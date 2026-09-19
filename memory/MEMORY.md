@@ -92,6 +92,42 @@ the user supplied (not stored here — ask the user if it's needed again).
   purely in-memory limiter (`backend/src/rateLimiter.ts`) and never touches
   Redis — this was a deliberate choice to cut Upstash command usage.
 
+## Build verification (2026-09-19)
+
+Both `backend` (`npx tsc --noEmit`, `npm run build`) and `frontend`
+(`npx tsc --noEmit`, `npm run build`) were installed and built clean in this
+environment — not just written, actually compiled. Notable real-world SDK
+gotchas discovered and fixed during this pass (future sessions should NOT
+re-introduce these):
+
+- **genlayer-js real API (v1.1.8, what's actually published) differs from
+  what the hosted docs describe** (which appear to document a newer/
+  pre-release API). The real client uses `client.writeContract({address,
+  functionName, args, value})` returning a tx hash directly (no separate
+  `estimateTransactionFeesForWrite`/`fees` step), and
+  `client.waitForTransactionReceipt({hash, status})` with a `TransactionStatus`
+  string enum (`"ACCEPTED"`, `"FINALIZED"`, etc.) — there is no
+  `waitForDecision`/`waitForFinalization`/`isSuccessful` export in this
+  version. Success is determined by `statusName === "FINALIZED" &&
+  txExecutionResultName !== "FINISHED_WITH_ERROR"`. See
+  `frontend/lib/genlayer.ts`.
+- `@reown/appkit`/`@reown/appkit-adapter-wagmi` must be pinned to an exact
+  compatible version (`1.7.8` here) with `wagmi@^2.19.5` — the latest
+  `^1.x` range resolves to a version whose bundled `@wagmi/connectors`
+  needs `@wagmi/core@3.x`, causing duplicate-type and missing-module
+  webpack errors. A `"overrides": {"@wagmi/core": "2.22.1"}` in
+  `frontend/package.json` forces a single deduped copy.
+- `next.config.mjs` stubs `@coinbase/cdp-sdk`, `@base-org/account`,
+  `@metamask/connect-evm` to `false` — optional Base Pay/x402/MetaMask-SDK
+  connector features this project doesn't use, pulled in transitively.
+- The whole frontend needs `export const dynamic = "force-dynamic"` in
+  `app/layout.tsx` — every page depends on the browser-only Reown AppKit
+  client, so build-time static prerendering fails without it.
+- `ioredis`/`pino-http` need **named** imports (`import { Redis } from
+  "ioredis"`, `import { pinoHttp } from "pino-http"`) under this project's
+  `NodeNext` TS module resolution — default imports resolve to the wrong
+  shape and fail to typecheck/call.
+
 ## Git / deployment
 
 - Repo: https://github.com/zoefunds/milestone-forge.git, `main` branch.
