@@ -68,7 +68,38 @@ the user supplied (not stored here — ask the user if it's needed again).
 - `frontend/` — Next.js app (Vercel).
 - `docs/` — architecture notes, deployment runbook.
 
-## Outstanding / waiting on user
+## Deployed contract
 
-- Contract address: NOT YET DEPLOYED. User will deploy and provide it.
-- Fly.io app names / Vercel project not yet created.
+- **Address**: `0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb`
+- **Network**: GenLayer StudioNet
+- Constructor args used: `default_dispute_bond_wei="2500000000000000000000"` (2,500 GEN),
+  `frivolous_slash_bps=10000` (100%), `upheld_bounty_bps=2000` (20%) — matches
+  the values shown in the user's design mockups.
+- Wired into `backend/.env` (`MILESTONE_FORGE_CONTRACT_ADDRESS`) and
+  `frontend/.env.local` (`NEXT_PUBLIC_MILESTONE_FORGE_CONTRACT_ADDRESS`).
+  These `.env`/`.env.local` files are gitignored — never committed.
+
+## Third-party services wired in (2026-09-19)
+
+- **Reown (WalletConnect) AppKit**: project id `4443f771b58e245d54961b49199dcb27`,
+  used for wallet connect + SIWE auth. `frontend/lib/reown.ts`.
+- **Redis (Upstash)**: `REDIS_URL` in `backend/.env`. Used for EXACTLY ONE
+  purpose — a shared cross-instance counter so the backend's multiple Fly.io
+  machines collectively stay under GenLayer's 30 requests/minute RPC limit
+  (`backend/src/genlayerRateLimiter.ts`, one atomic Lua EVAL per GenLayer
+  call, fails open to a conservative in-memory fallback if Redis is
+  unreachable). Ordinary per-IP HTTP API rate limiting uses a separate,
+  purely in-memory limiter (`backend/src/rateLimiter.ts`) and never touches
+  Redis — this was a deliberate choice to cut Upstash command usage.
+
+## Git / deployment
+
+- Repo: https://github.com/zoefunds/milestone-forge.git, `main` branch.
+- All commits authored as `zoefunds <preciousmofeoluwa@gmail.com>` — no
+  Claude/AI attribution in this repo's history (explicit user instruction,
+  overrides the default Claude Code attribution convention).
+- Fly.io app not yet created (`backend/fly.toml` is ready — app name
+  `milestone-forge-backend`, `flyctl launch`/`flyctl deploy` still needs to
+  be run, and `flyctl postgres create` + `flyctl secrets set` for DATABASE_URL,
+  REDIS_URL, SESSION_JWT_SECRET, REOWN_PROJECT_ID).
+- Vercel project not yet created for `frontend/`.
