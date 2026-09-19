@@ -134,8 +134,16 @@ re-introduce these):
 - All commits authored as `zoefunds <preciousmofeoluwa@gmail.com>` — no
   Claude/AI attribution in this repo's history (explicit user instruction,
   overrides the default Claude Code attribution convention).
-- Fly.io app not yet created (`backend/fly.toml` is ready — app name
-  `milestone-forge-backend`, `flyctl launch`/`flyctl deploy` still needs to
-  be run, and `flyctl postgres create` + `flyctl secrets set` for DATABASE_URL,
-  REDIS_URL, SESSION_JWT_SECRET, REOWN_PROJECT_ID).
-- Vercel project not yet created for `frontend/`.
+- **Fly.io: deployed.** App `milestone-forge-backend` (org: personal /
+  Priscilla George), region `iad`, 2 machines, Postgres cluster
+  `milestone-forge-db` attached, schema migrated, secrets set, public IPs
+  allocated. Live at https://milestone-forge-backend.fly.dev — verified
+  `/health/healthz` returns 200.
+- **Vercel: deployed.** Project `milestone-forge` (scope
+  `adebiyi2002gmailcoms-projects`). Live at the requested domain
+  **https://milestone-forge.vercel.app** (production alias). Env vars set.
+- Full runbook with exact commands: `docs/DEPLOYMENT.md`.
+- Not yet done: a live end-to-end wallet transaction test (create grant →
+  claim → consensus → release) against the deployed contract — needs a
+  real wallet with testnet GEN, best done by the user or in a follow-up
+  session with browser tools.
