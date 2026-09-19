@@ -87,6 +87,24 @@ export async function listGrants() {
   return client.readContract({ address: CONTRACT_ADDRESS, functionName: "list_grants", args: [] });
 }
 
+export async function listGrantsByGrantee(address: string) {
+  const client = getReadClient();
+  return client.readContract({
+    address: CONTRACT_ADDRESS,
+    functionName: "list_grants_by_grantee",
+    args: [address],
+  });
+}
+
+export async function listGrantsByFunder(address: string) {
+  const client = getReadClient();
+  return client.readContract({
+    address: CONTRACT_ADDRESS,
+    functionName: "list_grants_by_funder",
+    args: [address],
+  });
+}
+
 export async function listChallenges() {
   const client = getReadClient();
   return client.readContract({ address: CONTRACT_ADDRESS, functionName: "list_challenges", args: [] });
