@@ -39,27 +39,33 @@ export const wagmiAdapter = new WagmiAdapter({
   networks: [genLayerStudioNet as any],
 });
 
-export const appKit = typeof window !== "undefined"
-  ? createAppKit({
-      adapters: [wagmiAdapter],
-      networks: [genLayerStudioNet as any],
-      projectId,
-      metadata: {
-        name: "Milestone Forge",
-        description: "Fund the milestone, not the promise.",
-        url: typeof window !== "undefined" ? window.location.origin : "https://milestoneforge.org",
-        icons: ["/icon.svg"],
-      },
-      features: {
-        analytics: false,
-        email: false,
-        socials: false,
-      },
-      themeMode: "dark",
-      themeVariables: {
-        "--w3m-accent": "#4cd7f6",
-      },
-    })
-  : null;
+// createAppKit() must be called unconditionally at module scope, including
+// during SSR — the `useAppKit()` hook used by ConnectWalletButton runs on
+// every server render (Next.js renders "use client" components on the
+// server for the initial HTML too), and throws "Please call createAppKit
+// before using useAppKit" if this registration hasn't happened yet. Only
+// the actual modal UI needs a real `window`; createAppKit()'s config
+// registration itself is SSR-safe by design (this matches Reown's own
+// Next.js App Router integration pattern).
+export const appKit = createAppKit({
+  adapters: [wagmiAdapter],
+  networks: [genLayerStudioNet as any],
+  projectId,
+  metadata: {
+    name: "Milestone Forge",
+    description: "Fund the milestone, not the promise.",
+    url: typeof window !== "undefined" ? window.location.origin : "https://milestone-forge.vercel.app",
+    icons: ["/icon.svg"],
+  },
+  features: {
+    analytics: false,
+    email: false,
+    socials: false,
+  },
+  themeMode: "dark",
+  themeVariables: {
+    "--w3m-accent": "#4cd7f6",
+  },
+});
 
 export const wagmiConfig = wagmiAdapter.wagmiConfig;
