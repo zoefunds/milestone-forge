@@ -1,4 +1,5 @@
 import { createClient, createAccount } from "genlayer-js";
+import { studionet } from "genlayer-js/chains";
 import { config } from "./config.js";
 import { tryAcquireGenLayerSlot } from "./genlayerRateLimiter.js";
 import { logger } from "./logger.js";
@@ -14,10 +15,7 @@ import { logger } from "./logger.js";
 
 const readOnlyAccount = createAccount(); // ephemeral, used only for unauthenticated view calls
 export const genlayerClient = createClient({
-  chain: {
-    id: config.genlayerChainId,
-    rpcUrls: { default: { http: [config.genlayerRpcUrl] } },
-  } as any,
+  chain: studionet,
   account: readOnlyAccount,
 });
 
@@ -42,6 +40,6 @@ export async function readContract<T>(functionName: string, args: unknown[] = []
   return genlayerClient.readContract({
     address: config.contractAddress as `0x${string}`,
     functionName,
-    args,
+    args: args as any[],
   }) as Promise<T>;
 }

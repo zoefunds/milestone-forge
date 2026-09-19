@@ -1,4 +1,4 @@
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
@@ -45,7 +45,7 @@ if (config.redisUrl) {
     connectTimeout: 3000,
     lazyConnect: true,
   });
-  redis.on("error", (err) => {
+  redis.on("error", (err: Error) => {
     logger.warn({ err: err.message }, "redis error (genlayer rate limiter) — falling back to local limiter");
   });
 }

@@ -17,3 +17,4 @@ docs/contract_abi.json
 .fly/
 *.pem
 *.key
+*.tsbuildinfo

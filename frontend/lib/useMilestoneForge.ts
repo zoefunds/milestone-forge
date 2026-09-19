@@ -53,22 +53,22 @@ export function useClaimFailedRefund() {
 }
 
 /** Direct, unauthenticated reads straight from GenLayer StudioNet. */
-export async function readGrant(grantId: string) {
+export async function readGrant(grantId: string): Promise<any> {
   const client = getReadClient();
   return client.readContract({ address: CONTRACT_ADDRESS, functionName: "get_grant", args: [grantId] });
 }
 
-export async function readMilestone(milestoneId: string) {
+export async function readMilestone(milestoneId: string): Promise<any> {
   const client = getReadClient();
   return client.readContract({ address: CONTRACT_ADDRESS, functionName: "get_milestone", args: [milestoneId] });
 }
 
-export async function readCriterion(criterionId: string) {
+export async function readCriterion(criterionId: string): Promise<any> {
   const client = getReadClient();
   return client.readContract({ address: CONTRACT_ADDRESS, functionName: "get_criterion", args: [criterionId] });
 }
 
-export async function readCriterionResult(resultId: string) {
+export async function readCriterionResult(resultId: string): Promise<any> {
   const client = getReadClient();
   return client.readContract({
     address: CONTRACT_ADDRESS,
@@ -77,17 +77,17 @@ export async function readCriterionResult(resultId: string) {
   });
 }
 
-export async function readChallenge(challengeId: string) {
+export async function readChallenge(challengeId: string): Promise<any> {
   const client = getReadClient();
   return client.readContract({ address: CONTRACT_ADDRESS, functionName: "get_challenge", args: [challengeId] });
 }
 
-export async function listGrants() {
+export async function listGrants(): Promise<any> {
   const client = getReadClient();
   return client.readContract({ address: CONTRACT_ADDRESS, functionName: "list_grants", args: [] });
 }
 
-export async function listGrantsByGrantee(address: string) {
+export async function listGrantsByGrantee(address: string): Promise<any> {
   const client = getReadClient();
   return client.readContract({
     address: CONTRACT_ADDRESS,
@@ -96,7 +96,7 @@ export async function listGrantsByGrantee(address: string) {
   });
 }
 
-export async function listGrantsByFunder(address: string) {
+export async function listGrantsByFunder(address: string): Promise<any> {
   const client = getReadClient();
   return client.readContract({
     address: CONTRACT_ADDRESS,
@@ -105,12 +105,12 @@ export async function listGrantsByFunder(address: string) {
   });
 }
 
-export async function listChallenges() {
+export async function listChallenges(): Promise<any> {
   const client = getReadClient();
   return client.readContract({ address: CONTRACT_ADDRESS, functionName: "list_challenges", args: [] });
 }
 
-export async function readProtocolParams() {
+export async function readProtocolParams(): Promise<any> {
   const client = getReadClient();
   return client.readContract({ address: CONTRACT_ADDRESS, functionName: "get_protocol_params", args: [] });
 }

@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
-import pinoHttp from "pino-http";
+import { pinoHttp } from "pino-http";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { httpRateLimit } from "./rateLimiter.js";

@@ -3,12 +3,19 @@
 import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 
+// The published genlayer-js types don't export the TransactionStatus /
+// ExecutionResult enums at the package root (they're only used internally
+// in the GenLayerClient method signatures), but their runtime string values
+// are documented and stable, so we reference them as literals here.
+const STATUS_ACCEPTED = "ACCEPTED";
+const STATUS_FINALIZED = "FINALIZED";
+const EXECUTION_FAILED = "FINISHED_WITH_ERROR";
+
 export const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_MILESTONE_FORGE_CONTRACT_ADDRESS ??
   "") as `0x${string}`;
 
 export type TxLifecycleStatus =
   | "idle"
-  | "estimating"
   | "awaiting_signature"
   | "submitted"
   | "accepted"
@@ -24,9 +31,10 @@ export interface TxLifecycleState {
 /**
  * Read-only GenLayer client — no wallet required. Used for every page that
  * only needs to display contract state (Explore, Validator Consensus,
- * Challenge Hub listings, grant workspace). These calls hit GenLayer
- * StudioNet directly from the browser; they do NOT go through our backend,
- * so they are not subject to the backend's shared 30/min budget at all.
+ * Challenge Hub listings, grant workspace, history, profile). These calls
+ * hit GenLayer StudioNet directly from the browser and do NOT go through
+ * our backend, so they are not subject to the backend's shared 30/min
+ * budget at all.
  */
 export function getReadClient() {
   return createClient({ chain: studionet });
@@ -51,13 +59,17 @@ export async function getWriteClient(walletAddress: `0x${string}`) {
   return client;
 }
 
+function isTxSuccessful(tx: { statusName?: string; txExecutionResultName?: string }): boolean {
+  return tx.statusName === STATUS_FINALIZED && tx.txExecutionResultName !== EXECUTION_FAILED;
+}
+
 /**
- * Executes a payable or non-payable write against MilestoneForge, tracking
- * the REAL transaction lifecycle via the SDK (estimate -> sign -> submit ->
- * waitForDecision -> waitForFinalization), never a client-side timer and
- * never a string-matched RPC field. `onUpdate` is called at each real
- * lifecycle transition so the UI can render submitted/accepted/finalized
- * states truthfully.
+ * Executes a write against MilestoneForge, tracking the REAL transaction
+ * lifecycle via the GenLayer SDK's own status enum
+ * (submitted -> ACCEPTED -> FINALIZED, via two real
+ * `waitForTransactionReceipt` polls), never a client-side timer and never a
+ * string-matched RPC field. `onUpdate` fires at each real lifecycle
+ * transition so the UI renders truthful submitted/accepted/finalized states.
  */
 export async function executeContractWrite(
   walletAddress: `0x${string}`,
@@ -66,32 +78,16 @@ export async function executeContractWrite(
   valueWei: bigint | undefined,
   onUpdate: (state: TxLifecycleState) => void
 ): Promise<{ txId: string; success: boolean }> {
-  onUpdate({ status: "estimating" });
-  const client = await getWriteClient(walletAddress);
-
-  const write: Record<string, unknown> = {
-    address: CONTRACT_ADDRESS,
-    functionName,
-    args,
-  };
-  if (valueWei !== undefined) write.value = valueWei;
-
-  let estimate;
-  try {
-    estimate = await client.estimateTransactionFeesForWrite(write as any);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Fee estimation failed";
-    onUpdate({ status: "failed", error: message });
-    throw err;
-  }
-
   onUpdate({ status: "awaiting_signature" });
+  const client = await getWriteClient(walletAddress);
 
   let txId: string;
   try {
     txId = (await client.writeContract({
-      ...(write as any),
-      fees: { distribution: estimate.distribution, feeValue: estimate.feeValue },
+      address: CONTRACT_ADDRESS,
+      functionName,
+      args: args as any[],
+      value: valueWei ?? 0n,
     })) as string;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Wallet rejected or transaction failed to submit";
@@ -101,22 +97,31 @@ export async function executeContractWrite(
 
   onUpdate({ status: "submitted", txId });
 
-  // Responsive UI checkpoint: a decision has materialized (leader/validator
-  // consensus reached), but fees/refunds are not yet durably settled.
+  // Responsive UI checkpoint: validator consensus has produced a decision
+  // (ACCEPTED), which is not yet durably settled.
   try {
-    const decided = await client.waitForDecision({ hash: txId as `0x${string}` });
+    await client.waitForTransactionReceipt({ hash: txId as any, status: STATUS_ACCEPTED as any });
     onUpdate({ status: "accepted", txId });
-    void decided; // decision payload available for callers who need it
   } catch {
-    // fall through to finalization wait regardless — some paths only emit
-    // a single terminal transition
+    // some transactions may skip straight to a terminal status; fall
+    // through to the finalization wait regardless.
   }
 
-  const finalized = await client.waitForFinalization({ hash: txId as `0x${string}` });
-  const { isSuccessful } = await import("genlayer-js");
-  const success = isSuccessful(finalized as any);
+  let finalTx;
+  try {
+    finalTx = await client.waitForTransactionReceipt({ hash: txId as any, status: STATUS_FINALIZED as any });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Transaction did not reach finalization";
+    onUpdate({ status: "failed", txId, error: message });
+    return { txId, success: false };
+  }
 
-  onUpdate({ status: success ? "finalized" : "failed", txId, error: success ? undefined : (finalized as any).statusName });
+  const success = isTxSuccessful(finalTx as any);
+  onUpdate({
+    status: success ? "finalized" : "failed",
+    txId,
+    error: success ? undefined : String((finalTx as any).txExecutionResultName ?? "Execution failed"),
+  });
 
   return { txId, success };
 }

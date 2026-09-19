@@ -9,15 +9,16 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "14.2.5",
+    "next": "^14.2.32",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@reown/appkit": "^1.1.0",
-    "@reown/appkit-adapter-wagmi": "^1.1.0",
-    "wagmi": "^2.12.7",
-    "viem": "^2.19.1",
+    "@reown/appkit": "1.7.8",
+    "@reown/appkit-adapter-wagmi": "1.7.8",
+    "wagmi": "^2.19.5",
+    "viem": "^2.29.0",
     "@tanstack/react-query": "^5.51.23",
-    "siwe": "^2.3.2"
+    "siwe": "^2.3.2",
+    "genlayer-js": "^1.1.8"
   },
   "devDependencies": {
     "typescript": "^5.5.4",
@@ -27,5 +28,8 @@
     "tailwindcss": "^3.4.7",
     "postcss": "^8.4.40",
     "autoprefixer": "^10.4.19"
+  },
+  "overrides": {
+    "@wagmi/core": "2.22.1"
   }
 }

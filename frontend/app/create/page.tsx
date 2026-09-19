@@ -136,9 +136,7 @@ export default function CreateGrantPage() {
     try {
       const result = await run([granteeAddress, grantTitle, JSON.stringify(spec)], totalValueWei);
       if (result.success) {
-        // grant_id is returned as the write's return value on finalization in
-        // some SDK versions; fall back to redirecting to Explore if unknown.
-        setResultGrantId((result as any).returnValue ?? null);
+        setResultGrantId(result.txId);
         setTimeout(() => router.push("/explore"), 1500);
       }
     } catch (err) {
@@ -343,7 +341,7 @@ export default function CreateGrantPage() {
           {submitError && <div className="rounded-lg bg-error-container/20 p-3 text-error text-sm">{submitError}</div>}
           {resultGrantId && (
             <div className="rounded-lg bg-secondary/10 p-3 text-secondary text-sm">
-              Grant created: {resultGrantId}. Redirecting...
+              Grant created and finalized (tx {resultGrantId.slice(0, 14)}...). Redirecting...
             </div>
           )}
           <TxLifecycle state={state} />
