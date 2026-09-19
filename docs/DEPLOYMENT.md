@@ -66,9 +66,11 @@ vercel deploy --prod --yes
 
 ## 4. Post-deploy verification checklist
 
-- [x] `curl https://milestone-forge-backend.fly.dev/health/healthz` → `{"status":"ok"}`
+- [x] `curl https://milestone-forge-backend.fly.dev/health/healthz` → `{"status":"ok"}` (verified)
 - [x] Database schema migrated
-- [x] Frontend live at https://milestone-forge.vercel.app
+- [x] Frontend live at https://milestone-forge.vercel.app, fresh direct
+      load confirmed HTTP 200 (fixed a `createAppKit` SSR crash found
+      post-deploy — see MEMORY.md)
 - [ ] Wallet connects via Reown, SIWE sign-in succeeds (manual check —
       needs a real wallet + testnet GEN)
 - [ ] Create a test grant (small GEN amount) end-to-end

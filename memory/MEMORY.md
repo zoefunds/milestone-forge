@@ -143,6 +143,22 @@ re-introduce these):
   `adebiyi2002gmailcoms-projects`). Live at the requested domain
   **https://milestone-forge.vercel.app** (production alias). Env vars set.
 - Full runbook with exact commands: `docs/DEPLOYMENT.md`.
+- **Verified live and working (2026-09-19):** fresh direct load of
+  https://milestone-forge.vercel.app/ returns HTTP 200 (confirmed via
+  network inspection, not just visual/hydrated appearance) and
+  https://milestone-forge-backend.fly.dev/health/healthz returns
+  `{"status":"ok"}`.
+- **Real bug found and fixed post-deploy:** `frontend/lib/reown.ts` gated
+  `createAppKit(...)` behind `typeof window !== "undefined"`, so it never
+  ran during SSR. But `ConnectWalletButton`'s `useAppKit()` hook always
+  runs during SSR too (Next renders "use client" components server-side for
+  the initial HTML), and throws `"Please call createAppKit before using
+  useAppKit"` if registration hasn't happened — causing every direct/hard
+  page load (not client-side navigations, which don't re-run root layout)
+  to 500. Fix: call `createAppKit()` unconditionally at module scope —
+  it's SSR-safe by design, only the actual modal UI needs a real browser.
+  This is the documented Reown Next.js App Router pattern; don't
+  reintroduce the window guard around the `createAppKit()` call itself.
 - Not yet done: a live end-to-end wallet transaction test (create grant →
   claim → consensus → release) against the deployed contract — needs a
   real wallet with testnet GEN, best done by the user or in a follow-up
