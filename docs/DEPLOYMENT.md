@@ -10,8 +10,14 @@
 3. Deploy. Copy the resulting contract address.
 4. Set it in `backend/.env` (`MILESTONE_FORGE_CONTRACT_ADDRESS`) and
    `frontend/.env.local` (`NEXT_PUBLIC_MILESTONE_FORGE_CONTRACT_ADDRESS`).
-5. **Status: done.** Deployed at `0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb` on
-   StudioNet (see `memory/MEMORY.md`).
+5. **Status: a third redeploy is pending.** The currently-live address
+   `0xD09e8EE4C23E3900bdcC581859A3c658713155a1` still has two real bugs
+   fixed in source but not yet deployed (`gl.emit_event` and
+   `gl.block.timestamp`/`gl.hash` don't exist — see `contracts/README.md`
+   §"Things genvm-lint check does NOT catch" and `memory/MEMORY.md`). Run
+   `pytest contracts/tests/direct/ -v` (must be 6/6 passing) before
+   deploying again, then update the address everywhere per step 4 below
+   once the user deploys the fixed source.
 
 ## 2. Backend on Fly.io — **Status: done**
 
@@ -71,9 +77,17 @@ vercel deploy --prod --yes
 - [x] Frontend live at https://milestone-forge.vercel.app, fresh direct
       load confirmed HTTP 200 (fixed a `createAppKit` SSR crash found
       post-deploy — see MEMORY.md)
-- [ ] Wallet connects via Reown, SIWE sign-in succeeds (manual check —
-      needs a real wallet + testnet GEN)
-- [ ] Create a test grant (small GEN amount) end-to-end
+- [x] Wallet connects via Reown, SIWE sign-in succeeds
+- [x] Create a test grant (small GEN amount) end-to-end — succeeded against
+      `0xD09e8EE4C23E3900bdcC581859A3c658713155a1` after fixing the
+      `DynArray` construction bug found on the first attempt (against the
+      now-superseded `0x8Bbb...B1DFb`).
+- [ ] A **third redeploy is required** before continuing this checklist —
+      `update_protocol_params` on the current address failed with a
+      `gl.emit_event` bug (fixed in source, not yet deployed). A further
+      `gl.block.timestamp`/`gl.hash` bug was also found and fixed via local
+      testing before it could hit a live transaction. See
+      `contracts/README.md` and `memory/MEMORY.md`.
 - [ ] Submit a milestone claim, watch the real tx lifecycle (submitted →
       accepted → finalized) render in the UI
 - [ ] Confirm the GenLayer rate limiter's Redis key appears in Upstash

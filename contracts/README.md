@@ -3,7 +3,7 @@
 The single production [GenLayer](https://docs.genlayer.com/) Intelligent Contract for the protocol. See [`../docs/PROTOCOL.md`](../docs/PROTOCOL.md) for the full behavioral spec.
 
 - **File**: `milestone_forge.py` (~1,600 lines)
-- **Deployed at**: `0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb` on GenLayer StudioNet
+- **Deployed at**: `0xD09e8EE4C23E3900bdcC581859A3c658713155a1` on GenLayer StudioNet
 - **Runner**: pinned to `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6` in the file's first-line `Depends` comment. Never change this to `:test` or `:latest` — those are local-development-only aliases that GenLayer networks reject.
 
 ## Constructor arguments (as deployed)
@@ -42,7 +42,24 @@ genvm-lint schema milestone_forge.py --output ../docs/contract_abi.json
 
 ## Testing
 
-There is no automated test suite committed yet — `tests/` is scaffolded but empty. If you add tests, use GenLayer's own direct-mode (fast, no server, exercises business logic and validation but not validator consensus) and integration-mode (slower, full consensus, exercises real web/LLM/onchain fetches and validator agreement) testing rather than inventing a new harness.
+`tests/direct/` has direct-mode tests (fast, in-process, no server — exercises business logic, state transitions, and access control, but not full validator consensus):
+
+```bash
+pip install genlayer-test
+pytest contracts/tests/direct/ -v
+```
+
+These tests are what caught three real runtime bugs the first deployment shipped with (see "Things `genvm-lint` does not catch" below) — **run them before every redeploy**, not just lint. There is no integration-mode (full consensus) test suite yet.
+
+## Things `genvm-lint check` does NOT catch
+
+Lint passing is a necessary but not sufficient check — it does purely static AST/SDK-semantic validation, never executes the contract. The first three real bugs found in this contract all passed lint cleanly and only surfaced on an actual transaction (two of them via a failed live `create_grant`/`update_protocol_params` on StudioNet, the third via local direct-mode tests written afterward):
+
+1. **`DynArray[T]()` / `TreeMap[K, V]()` can never be constructed directly** — not even via `gl.storage.inmem_allocate`, which is for generic `@allow_storage` dataclasses only. `DynArray.__init__` unconditionally raises `TypeError: this class can't be instantiated by user`. For a local temporary collection, just use a plain Python `list`/`dict` — the storage descriptor (`_DynArrayDesc.set`, etc.) accepts any `Sequence`/`Mapping` on assignment and converts it.
+2. **There is no flat `gl.emit_event(name, dict)` function.** Define event classes as `class MyEvent(gl.Event): def __init__(self, /, **blob): ...` and emit via `MyEvent(**fields).emit()`. See the `Events` section near the top of `milestone_forge.py` for the working pattern.
+3. **There is no `gl.block.timestamp` or `gl.hash`.** The only timestamp available is the ISO-8601 string at `gl.message_raw["datetime"]` (part of the signed transaction input, so it's deterministic across validators) — see `_current_timestamp()`. Hashing uses `Keccak256(...).hexdigest()` (exported directly from `genlayer`, i.e. `from genlayer import *` already gives you `Keccak256`), not `gl.hash.sha3_256`.
+
+If you're adding new contract logic and unsure whether an API exists, grep the actual installed SDK source before trusting hosted docs or memory of similar projects — `~/.cache/gltest-direct/extracted/<version>/py-lib-genlayer-std/*/genlayer/` has the real, current implementation. The hosted docs at docs.genlayer.com describe a noticeably different (likely newer/pre-release) API surface for several of these — see `frontend/README.md` for the same problem on the JS SDK side.
 
 ## Key design points worth knowing before you touch this file
 
@@ -50,4 +67,4 @@ There is no automated test suite committed yet — `tests/` is scaffolded but em
 - **The nondeterministic evaluation (`_evaluate_milestone`) and the deterministic payout calculation (`_compute_deterministic_payout_bps`) are intentionally separate functions.** Don't let web/LLM logic creep into the payout math, and don't let the payout math perform any nondeterministic call.
 - **Equivalence comparison is on the `passed` boolean per criterion, exactly** — not on free text, not on a JSON-schema-only check. If you add a new criterion type, its validator function must independently re-derive the same boolean, not just check that the leader's output is well-formed.
 - **Criteria and artifact locations are immutable after `create_grant`.** A challenge can only add evidence via `file_challenge`/`resolve_challenge`; there is no method that lets anyone edit a `Criterion` after creation.
-- **Never construct a local `DynArray[T]()` or `TreeMap[K, V]()` directly.** GenVM rejects it at runtime with `TypeError: this class can't be instantiated by user` — this is a live-transaction-only failure that `genvm-lint check` does **not** catch (lint passing is not proof the contract will execute). Use `gl.storage.inmem_allocate(DynArray[T])` (or `TreeMap[K, V]`) instead, then `.append()`/assign into it as normal. This bit the first real deployment — see `memory/MEMORY.md` for the incident.
+- **Never construct a local `DynArray[T]()` or `TreeMap[K, V]()` directly, and don't use `gl.storage.inmem_allocate` for them either** — see "Things `genvm-lint check` does NOT catch" below for the actual fix (plain Python `list`/`dict`).

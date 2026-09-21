@@ -43,6 +43,7 @@
 
 from genlayer import *
 from dataclasses import dataclass
+import datetime
 import json
 import typing
 
@@ -146,6 +147,20 @@ def _u256_from_str(value: str) -> u256:
         raise gl.vm.UserError(f"{ERROR_EXPECTED} Malformed numeric ledger value: {value}")
 
 
+def _current_timestamp() -> u256:
+    """Deterministic current-transaction time as unix seconds.
+
+    There is no `gl.block.timestamp` in this GenVM version — the only
+    timestamp available is the ISO-8601 transaction datetime string at
+    `gl.message_raw["datetime"]`. It's part of the signed transaction input,
+    so it's identical across every validator (deterministic), unlike a
+    wall-clock read.
+    """
+    raw = gl.message_raw["datetime"]
+    iso = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    return u256(int(datetime.datetime.fromisoformat(iso).timestamp()))
+
+
 # ----------------------------------------------------------------------------
 # Storage dataclasses
 #
@@ -240,6 +255,55 @@ class Grant:
     status: str
     created_at: u256
     milestone_ids: DynArray[str]
+
+
+# ----------------------------------------------------------------------------
+# Events
+#
+# There is no flat `gl.emit_event(name, dict)` function in GenVM — events are
+# defined as subclasses of `gl.Event` and emitted via `SomeEvent(**fields).emit()`.
+# None of these events carry indexed topic fields (no positional-only args
+# before the `/`); every field is passed as keyword blob, which is sufficient
+# for this contract's observability/audit-trail needs.
+# ----------------------------------------------------------------------------
+class GrantCreated(gl.Event):
+    def __init__(self, /, **blob): ...
+
+
+class MilestoneCancelled(gl.Event):
+    def __init__(self, /, **blob): ...
+
+
+class MilestoneClaimSubmitted(gl.Event):
+    def __init__(self, /, **blob): ...
+
+
+class MilestoneEvaluated(gl.Event):
+    def __init__(self, /, **blob): ...
+
+
+class ChallengeFiled(gl.Event):
+    def __init__(self, /, **blob): ...
+
+
+class ChallengeResolved(gl.Event):
+    def __init__(self, /, **blob): ...
+
+
+class MilestoneReleased(gl.Event):
+    def __init__(self, /, **blob): ...
+
+
+class MilestoneRefunded(gl.Event):
+    def __init__(self, /, **blob): ...
+
+
+class ProtocolParamsUpdated(gl.Event):
+    def __init__(self, /, **blob): ...
+
+
+class AdminTransferred(gl.Event):
+    def __init__(self, /, **blob): ...
 
 
 # ----------------------------------------------------------------------------
@@ -346,7 +410,7 @@ class MilestoneForge(gl.Contract):
         self.next_grant_seq = self.next_grant_seq + u256(1)
 
         total_reward = u256(0)
-        milestone_ids: DynArray[str] = gl.storage.inmem_allocate(DynArray[str])
+        milestone_ids: list[str] = []
 
         for idx, m_spec in enumerate(spec):
             milestone_id, reward = self._create_milestone_from_spec(grant_id, u256(idx), m_spec)
@@ -381,10 +445,12 @@ class MilestoneForge(gl.Contract):
         self._index_grant_for_account(self.grants_by_funder, funder, grant_id)
         self._index_grant_for_account(self.grants_by_grantee, grantee, grant_id)
 
-        gl.emit_event(
-            "GrantCreated",
-            {"grant_id": grant_id, "funder": funder.as_hex, "grantee": grantee.as_hex, "total_reward_wei": str(int(total_reward))},
-        )
+        GrantCreated(
+            grant_id=grant_id,
+            funder=funder.as_hex,
+            grantee=grantee.as_hex,
+            total_reward_wei=str(int(total_reward)),
+        ).emit()
         return grant_id
 
     def _create_milestone_from_spec(self, grant_id: str, index: u256, m_spec: dict) -> tuple[str, u256]:
@@ -416,7 +482,7 @@ class MilestoneForge(gl.Contract):
         milestone_id = f"ms-{int(self.next_milestone_seq)}"
         self.next_milestone_seq = self.next_milestone_seq + u256(1)
 
-        criteria_ids: DynArray[str] = gl.storage.inmem_allocate(DynArray[str])
+        criteria_ids: list[str] = []
         weight_total = u256(0)
         for c_spec in criteria_list:
             criterion_id = self._create_criterion(milestone_id, c_spec)
@@ -442,7 +508,7 @@ class MilestoneForge(gl.Contract):
             claimed_artifact_hash="",
             claim_note="",
             verdict="",
-            result_ids=gl.storage.inmem_allocate(DynArray[str]),
+            result_ids=[],
             recommended_payout_bps=u256(0),
             evaluated_at=u256(0),
             challenge_window_opens_at=u256(0),
@@ -588,7 +654,7 @@ class MilestoneForge(gl.Contract):
         if key in index:
             index[key].append(grant_id)
         else:
-            bucket: DynArray[str] = gl.storage.inmem_allocate(DynArray[str])
+            bucket: list[str] = []
             bucket.append(grant_id)
             index[key] = bucket
 
@@ -617,7 +683,7 @@ class MilestoneForge(gl.Contract):
         milestone.status = MILESTONE_STATUS_CANCELLED
         self.milestones[milestone_id] = milestone
 
-        gl.emit_event("MilestoneCancelled", {"milestone_id": milestone_id, "refund_wei": str(int(refund))})
+        MilestoneCancelled(milestone_id=milestone_id, refund_wei=str(int(refund))).emit()
         _send_gen(grant.funder, refund)
 
     # ========================================================================
@@ -649,7 +715,7 @@ class MilestoneForge(gl.Contract):
         if milestone.claimable_after > u256(0) and gl.message.chain_id is not None:
             # claimable_after is a business-logic timestamp gate set at genesis;
             # deterministic comparison against the current block timestamp.
-            if gl.block.timestamp < milestone.claimable_after:
+            if _current_timestamp() < milestone.claimable_after:
                 raise gl.vm.UserError(
                     f"{ERROR_EXPECTED} Milestone not claimable until timestamp {int(milestone.claimable_after)}"
                 )
@@ -657,19 +723,18 @@ class MilestoneForge(gl.Contract):
         # Pin the snapshot: deterministic hash of milestone_id + criteria ids +
         # claim_note + current timestamp, computed identically by every
         # validator from on-chain inputs only (no external fetch here).
-        pin_payload = "|".join([milestone_id] + list(milestone.criteria_ids) + [claim_note, str(int(gl.block.timestamp))])
-        snapshot_hash = gl.hash.sha3_256(pin_payload.encode("utf-8")).hex()
+        pin_payload = "|".join([milestone_id] + list(milestone.criteria_ids) + [claim_note, str(int(_current_timestamp()))])
+        snapshot_hash = Keccak256(pin_payload.encode("utf-8")).hexdigest()
 
-        milestone.claim_submitted_at = gl.block.timestamp
+        milestone.claim_submitted_at = _current_timestamp()
         milestone.claimed_artifact_hash = snapshot_hash
         milestone.claim_note = claim_note
         milestone.status = MILESTONE_STATUS_EVALUATING
         self.milestones[milestone_id] = milestone
 
-        gl.emit_event(
-            "MilestoneClaimSubmitted",
-            {"milestone_id": milestone_id, "snapshot_hash": snapshot_hash, "grantee": grant.grantee.as_hex},
-        )
+        MilestoneClaimSubmitted(
+            milestone_id=milestone_id, snapshot_hash=snapshot_hash, grantee=grant.grantee.as_hex
+        ).emit()
 
         # Run the independent multi-validator inspection + Equivalence
         # Principle consensus. This mutates milestone state to reflect the
@@ -984,7 +1049,7 @@ class MilestoneForge(gl.Contract):
         criteria_entries = result.get("criteria", [])
         any_unreachable = bool(result.get("any_unreachable", False))
 
-        result_ids: DynArray[str] = gl.storage.inmem_allocate(DynArray[str])
+        result_ids: list[str] = []
         passed_weight = u256(0)
         total_weight = u256(0)
         for entry in criteria_entries:
@@ -1005,7 +1070,7 @@ class MilestoneForge(gl.Contract):
                 passed_weight = passed_weight + criterion.weight_bps
 
         milestone.result_ids = result_ids
-        milestone.evaluated_at = gl.block.timestamp
+        milestone.evaluated_at = _current_timestamp()
 
         if any_unreachable:
             verdict = VERDICT_INCONCLUSIVE
@@ -1023,8 +1088,8 @@ class MilestoneForge(gl.Contract):
 
         if verdict in (VERDICT_PASSED, VERDICT_PARTIAL_PASS):
             milestone.status = MILESTONE_STATUS_CHALLENGE_WINDOW
-            milestone.challenge_window_opens_at = gl.block.timestamp
-            milestone.challenge_window_closes_at = gl.block.timestamp + milestone.challenge_window_seconds
+            milestone.challenge_window_opens_at = _current_timestamp()
+            milestone.challenge_window_closes_at = _current_timestamp() + milestone.challenge_window_seconds
         elif verdict == VERDICT_FAILED:
             milestone.status = MILESTONE_STATUS_FAILED
         else:  # INCONCLUSIVE
@@ -1032,14 +1097,11 @@ class MilestoneForge(gl.Contract):
 
         self.milestones[milestone_id] = milestone
 
-        gl.emit_event(
-            "MilestoneEvaluated",
-            {
-                "milestone_id": milestone_id,
-                "verdict": verdict,
-                "recommended_payout_bps": str(int(milestone.recommended_payout_bps)),
-            },
-        )
+        MilestoneEvaluated(
+            milestone_id=milestone_id,
+            verdict=verdict,
+            recommended_payout_bps=str(int(milestone.recommended_payout_bps)),
+        ).emit()
 
     def _compute_deterministic_payout_bps(self, verdict: str, passed_weight: u256, total_weight: u256) -> u256:
         """Pure deterministic function — no web access, no LLM, no randomness.
@@ -1086,7 +1148,7 @@ class MilestoneForge(gl.Contract):
 
         if milestone.status != MILESTONE_STATUS_CHALLENGE_WINDOW:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Milestone is not in an active challenge window")
-        if gl.block.timestamp >= milestone.challenge_window_closes_at:
+        if _current_timestamp() >= milestone.challenge_window_closes_at:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Challenge window has already closed")
         if milestone.active_challenge_id:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} A challenge is already pending for this milestone")
@@ -1118,7 +1180,7 @@ class MilestoneForge(gl.Contract):
             evidence_url=evidence_url,
             evidence_note=evidence_note,
             status=CHALLENGE_STATUS_PENDING,
-            filed_at=gl.block.timestamp,
+            filed_at=_current_timestamp(),
             resolved_at=u256(0),
             resolution_detail="",
         )
@@ -1129,10 +1191,9 @@ class MilestoneForge(gl.Contract):
         milestone.status = MILESTONE_STATUS_DISPUTED
         self.milestones[milestone_id] = milestone
 
-        gl.emit_event(
-            "ChallengeFiled",
-            {"challenge_id": challenge_id, "milestone_id": milestone_id, "challenger": sender.as_hex, "category": category},
-        )
+        ChallengeFiled(
+            challenge_id=challenge_id, milestone_id=milestone_id, challenger=sender.as_hex, category=category
+        ).emit()
         return challenge_id
 
     @gl.public.write
@@ -1245,13 +1306,12 @@ class MilestoneForge(gl.Contract):
             challenge.resolution_detail = "Re-inspection confirmed original verdict; evidence did not corroborate"
             self._settle_rejected_challenge(milestone, challenge, bond)
 
-        challenge.resolved_at = gl.block.timestamp
+        challenge.resolved_at = _current_timestamp()
         self.challenges[challenge_id] = challenge
 
-        gl.emit_event(
-            "ChallengeResolved",
-            {"challenge_id": challenge_id, "milestone_id": milestone.milestone_id, "status": challenge.status},
-        )
+        ChallengeResolved(
+            challenge_id=challenge_id, milestone_id=milestone.milestone_id, status=challenge.status
+        ).emit()
         return challenge.status
 
     def _settle_upheld_challenge(self, milestone: Milestone, challenge: Challenge, bond: u256) -> None:
@@ -1316,7 +1376,7 @@ class MilestoneForge(gl.Contract):
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Milestone is not awaiting release")
         if milestone.active_challenge_id:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Cannot release while a challenge is pending")
-        if gl.block.timestamp < milestone.challenge_window_closes_at:
+        if _current_timestamp() < milestone.challenge_window_closes_at:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Challenge window has not closed yet")
 
         reward_pool = _u256_from_str(milestone.reward_deposited)
@@ -1336,14 +1396,11 @@ class MilestoneForge(gl.Contract):
         self._unlock_next_milestone(grant, milestone)
         self._maybe_complete_grant(grant)
 
-        gl.emit_event(
-            "MilestoneReleased",
-            {
-                "milestone_id": milestone_id,
-                "grantee_share_wei": str(int(grantee_share)),
-                "funder_refund_wei": str(int(funder_refund)),
-            },
-        )
+        MilestoneReleased(
+            milestone_id=milestone_id,
+            grantee_share_wei=str(int(grantee_share)),
+            funder_refund_wei=str(int(funder_refund)),
+        ).emit()
 
         if grantee_share > u256(0):
             _send_gen(grant.grantee, grantee_share)
@@ -1400,7 +1457,7 @@ class MilestoneForge(gl.Contract):
         self._unlock_next_milestone_after_failure(grant, milestone)
         self._maybe_complete_grant(grant)
 
-        gl.emit_event("MilestoneRefunded", {"milestone_id": milestone_id, "refund_wei": str(int(refund))})
+        MilestoneRefunded(milestone_id=milestone_id, refund_wei=str(int(refund))).emit()
         _send_gen(grant.funder, refund)
 
     def _unlock_next_milestone_after_failure(self, grant: Grant, failed: Milestone) -> None:
@@ -1533,11 +1590,11 @@ class MilestoneForge(gl.Contract):
 
     @gl.public.view
     def list_grants_by_funder(self, funder_address: str) -> DynArray[str]:
-        return self.grants_by_funder.get(Address(funder_address).as_hex, gl.storage.inmem_allocate(DynArray[str]))
+        return self.grants_by_funder.get(Address(funder_address).as_hex, [])
 
     @gl.public.view
     def list_grants_by_grantee(self, grantee_address: str) -> DynArray[str]:
-        return self.grants_by_grantee.get(Address(grantee_address).as_hex, gl.storage.inmem_allocate(DynArray[str]))
+        return self.grants_by_grantee.get(Address(grantee_address).as_hex, [])
 
     @gl.public.view
     def list_challenges(self) -> DynArray[str]:
@@ -1573,14 +1630,14 @@ class MilestoneForge(gl.Contract):
         self.default_dispute_bond_wei = default_dispute_bond_wei
         self.frivolous_slash_bps = frivolous_slash_bps
         self.upheld_bounty_bps = upheld_bounty_bps
-        gl.emit_event("ProtocolParamsUpdated", {"default_dispute_bond_wei": default_dispute_bond_wei})
+        ProtocolParamsUpdated(default_dispute_bond_wei=default_dispute_bond_wei).emit()
 
     @gl.public.write
     def transfer_admin(self, new_admin_address: str) -> None:
         if gl.message.sender_address != self.protocol_admin:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Only the protocol admin may transfer admin rights")
         self.protocol_admin = Address(new_admin_address)
-        gl.emit_event("AdminTransferred", {"new_admin": self.protocol_admin.as_hex})
+        AdminTransferred(new_admin=self.protocol_admin.as_hex).emit()
 
     # ========================================================================
     # Internal lookup helpers

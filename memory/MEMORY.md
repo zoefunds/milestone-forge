@@ -56,30 +56,53 @@ scratch:
   `typeof window` — this caused a real production 500 on every direct page
   load. See `frontend/README.md`.
 
-## Contract redeploy required (2026-09-21)
+## Three real runtime bugs found and fixed pre-3rd-deploy (2026-09-21)
 
-The **first live transaction against the deployed contract failed** at
-`create_grant` with `TypeError: this class can't be instantiated by user`
-from GenVM's `DynArray.__init__`. Root cause: the contract built local
-temporary collections with `DynArray[str]()` directly (e.g.
-`milestone_ids: DynArray[str] = DynArray[str]()`) — GenVM does not allow
-that. The correct pattern, confirmed against the docs, is
-`gl.storage.inmem_allocate(DynArray[str])`. `genvm-lint check` does NOT
-catch this — it's a runtime-only failure, so lint passing is not sufficient
-proof a contract will actually execute.
+Two failed live transactions on StudioNet, then local direct-mode testing
+(`contracts/tests/direct/`, added this session), surfaced three bugs that
+`genvm-lint check` cannot catch (it's static-only, never executes the
+contract). Full technical detail: `contracts/README.md` §"Things
+genvm-lint check does NOT catch". Summary:
 
-Fixed in `contracts/milestone_forge.py` (all 7 occurrences). **This means
-the deployed contract at `0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb` is
-stale/broken and must be redeployed** — the fix only exists in source until
-the user redeploys via GenLayer Studio and provides the new address (same
-process as `contracts/README.md`). Do not assume that address is still
-current without checking whether a redeploy has happened since this note
-was written.
+1. **`DynArray[T]()` can never be constructed directly — not even via
+   `gl.storage.inmem_allocate`** (that's for generic `@allow_storage`
+   dataclasses only; `DynArray.__init__` unconditionally raises). The
+   actual fix is a plain Python `list` for any local temporary collection.
+   First deploy (`0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb`) hit this on
+   `create_grant`. An earlier fix attempt using `inmem_allocate` was itself
+   wrong and would have failed too — confirmed by local execution, not
+   assumption.
+2. **There is no flat `gl.emit_event(name, dict)` function.** Second deploy
+   (`0xD09e8EE4C23E3900bdcC581859A3c658713155a1`) hit this on
+   `update_protocol_params`. Fixed by defining `gl.Event` subclasses and
+   calling `.emit()`.
+3. **There is no `gl.block.timestamp` or `gl.hash`.** Found via local
+   direct-mode tests before it could hit a third live transaction. Fixed
+   with `_current_timestamp()` (reads `gl.message_raw["datetime"]`) and
+   `Keccak256(...).hexdigest()`.
+
+All three fixed in `contracts/milestone_forge.py`, verified by
+`genvm-lint check` (clean) AND by actually running
+`pytest contracts/tests/direct/ -v` locally (6/6 passing, covering
+create_grant, claim submission through a real mocked-web evaluation to a
+PASSED verdict, access control, and challenge bond validation) — this is
+the first point in the project where the contract has been proven to
+execute, not just parse.
+
+**As of this note, none of the three fixes have been deployed yet.** The
+live address `0xD09e8EE4C23E3900bdcC581859A3c658713155a1` still has bugs
+#2 and #3. **A third redeploy is required** before any further live
+transaction testing. If a future session finds `create_grant` or any write
+failing with `TypeError`/`AttributeError` from GenVM again, check
+`git log -- contracts/milestone_forge.py` for whether these fixes are
+present in the currently-deployed source.
 
 ## Outstanding / not yet done
 
-- No automated test suite (`contracts/tests/` is scaffolded, empty).
-- No live end-to-end wallet transaction has been run against the deployed
-  contract yet (create grant → claim → consensus → release, with real
-  testnet GEN) — needs a real wallet with funds, best done by the user or
-  in a follow-up session with browser tools.
+- Contract needs a third redeploy (see above) before continuing live testing.
+- Only direct-mode tests exist (fast, in-process, no full validator
+  consensus exercised). No integration-mode (real consensus) test suite yet.
+- No live end-to-end wallet transaction has fully succeeded against a
+  deployed contract yet (create grant did succeed once, at the address that
+  has since been superseded; claim → consensus → release has never been
+  tried live, only in direct-mode tests).
