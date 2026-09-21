@@ -125,17 +125,18 @@ mocked-web evaluation to a PASSED verdict, access control, and challenge
 bond validation) — this was the first point in the project where the
 contract had been proven to execute, not just parse.
 
-**Current live address (third deploy): `0x565E9013F85fa91491ecDD87E095201E0AEd1b84`**
-— wired into `backend/.env`, the Fly.io secret, `frontend/.env.local`, and
-the Vercel env var, both apps redeployed. Constructor args unchanged
-(2,500 GEN bond, 100% frivolous slash, 20% upheld bounty). **Not yet
-confirmed working live** — `create_grant`/`update_protocol_params` should
-be retried against this address before assuming the fixes hold in
-production and not just in direct-mode tests. If a future session finds
-any write failing with `TypeError`/`AttributeError` from GenVM again,
-check `git log -- contracts/milestone_forge.py` for whether these three
-fixes are present in the currently-deployed source — don't assume they
-regressed without checking.
+Third deploy (`0x565E9013F85fa91491ecDD87E095201E0AEd1b84`) shipped these
+three fixes and was, at the time, unconfirmed live. It has since been
+**superseded by the fourth deploy** (`0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`
+— see "Challenge resolution fix" section below), which carries the same
+three fixes plus the challenge-resolution correctness fix, and **has been
+confirmed working live**: a full `create_grant` → `submit_milestone_claim`
+→ `file_challenge` → `resolve_challenge` run completed successfully under
+real GenVM consensus (see "Live e2e test" section below). If a future
+session finds any write failing with `TypeError`/`AttributeError` from
+GenVM again, check `git log -- contracts/milestone_forge.py` for whether
+these three fixes are present in the currently-deployed source — don't
+assume they regressed without checking.
 
 ## Challenge resolution fix — redeploy #4 shipped and confirmed live (2026-09-21)
 

@@ -35,7 +35,7 @@ client.writeContract({ address, functionName, args, value }) // → tx hash, str
 client.waitForTransactionReceipt({ hash, status: "ACCEPTED" | "FINALIZED" | ... })
 ```
 
-There is no `estimateTransactionFeesForWrite`, `waitForDecision`, `waitForFinalization`, or `isSuccessful` export in this version — if you see those names in the hosted docs, verify against `node_modules/genlayer-js/dist/index.d.ts` before using them; they don't exist in what's actually installed. `executeContractWrite()` in `lib/genlayer.ts` tracks the real lifecycle (submitted → ACCEPTED → FINALIZED) via two real `waitForTransactionReceipt` polls and determines success from `statusName === "FINALIZED" && txExecutionResultName !== "FINISHED_WITH_ERROR"` — never a client-side timer standing in for actual status.
+There is no `estimateTransactionFeesForWrite`, `waitForDecision`, `waitForFinalization`, or `isSuccessful` export in this version — if you see those names in the hosted docs, verify against `node_modules/genlayer-js/dist/index.d.ts` before using them; they don't exist in what's actually installed. `executeContractWrite()` in `lib/genlayer.ts` tracks the real lifecycle (submitted → ACCEPTED → FINALIZED) via two real `waitForTransactionReceipt` polls, with generous explicit wait budgets (~3 min for ACCEPTED, ~10 min for FINALIZED — StudioNet consensus on a claim/challenge write routinely takes well over a minute) and a distinct non-alarming `"timeout"` lifecycle state for when our poll gives up without the write itself having failed. Success is determined by `isTxSuccessful()`, which reads `tx.status_name` (**not** `tx.statusName` — `simplifyTransactionReceipt` renames it to snake_case, and checking the camelCase field silently reports every successful transaction as failed) and checks `consensus_data.leader_receipt[].execution_result` for an actual error signal (`studionet`'s `getTransaction` never populates `txExecutionResultName` at all). Absence of an error signal is treated as success, never failure — a false "failed" report is worse than a missed true failure, since it tells the user their GEN is gone when it isn't. Full incident writeup: `memory/MEMORY.md`.
 
 `lib/useMilestoneForge.ts` exposes one hook per contract write (`useCreateGrant`, `useSubmitMilestoneClaim`, `useFileChallenge`, `useResolveChallenge`, `useReleaseMilestone`, `useRetryInconclusive`, `useCancelMilestone`, `useClaimFailedRefund`) plus plain async read functions (`readGrant`, `readMilestone`, `readCriterion`, `readCriterionResult`, `readChallenge`, `listGrants`, `listChallenges`, `listGrantsByFunder`, `listGrantsByGrantee`, `readProtocolParams`).
 
@@ -73,3 +73,9 @@ See [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md). To redeploy after a code c
 ```bash
 vercel deploy --prod --yes
 ```
+
+**If the change is (or touches) a `NEXT_PUBLIC_*` env var** — most commonly `NEXT_PUBLIC_MILESTONE_FORGE_CONTRACT_ADDRESS` after a redeploy — use `--force` instead:
+```bash
+vercel deploy --prod --yes --force
+```
+Vercel restores the previous build's cache by default, and that cache does not invalidate on an env var change alone (the var gets inlined into JS at build time, but the build step can consider the source file "unchanged" and skip recompiling it). A plain `--yes` deploy can report success while silently shipping a bundle with the *old* value still baked in — this happened for real during the fourth contract redeploy (see `memory/MEMORY.md`) and produced no error anywhere, just wrong live data. `--force` (without also passing `--with-cache`) discards the cache and forces a clean rebuild.

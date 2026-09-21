@@ -49,7 +49,9 @@ pip install genlayer-test
 pytest contracts/tests/direct/ -v
 ```
 
-These tests are what caught three real runtime bugs the first deployment shipped with (see "Things `genvm-lint` does not catch" below) — **run them before every redeploy**, not just lint. There is no integration-mode (full consensus) test suite yet.
+These tests are what caught three real runtime bugs the first deployment shipped with (see "Things `genvm-lint` does not catch" below), and separately proved the challenge-resolution correctness fix (criterion binding, bound-evidence corroboration, settlement math) before the fourth deploy — **run them before every redeploy**, not just lint. Current count: 11 tests, all passing.
+
+There is no automated integration-mode (full consensus) test suite yet. A manual, one-off live end-to-end run has been completed against the deployed contract instead — `create_grant` → `submit_milestone_claim` → `file_challenge` → `resolve_challenge` under real multi-validator consensus, confirming the challenge-resolution fix holds outside direct-mode too. See `memory/MEMORY.md` for the run details; it wasn't captured as a repeatable test in this directory.
 
 ## Things `genvm-lint check` does NOT catch
 

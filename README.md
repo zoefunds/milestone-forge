@@ -86,7 +86,7 @@ Each of `contracts/`, `backend/`, and `frontend/` has its own README with setup 
            │ genlayer-js (reads only, backend never writes)
 ┌──────────▼─────────────────┐
 │  MilestoneForge.py            │  GenLayer StudioNet
-│  Intelligent Contract          │  0x565E...d1b84
+│  Intelligent Contract          │  0xc7aA66...871314
 │  - grant/escrow/tranches       │
 │  - pinned criteria + artifacts │
 │  - validator web-fetch         │
@@ -151,8 +151,9 @@ safe, always-reachable test values — no need to look anything up.
 This is an honest snapshot, not a marketing page:
 
 - Both `backend` and `frontend` build and typecheck clean and are deployed and health-checked live (see above).
-- **No automated test suite yet** — `contracts/tests/` is scaffolded but empty. The contract has been verified with `genvm-lint check` (lint + SDK-semantic validation + ABI schema extraction) but not yet exercised with GenLayer's direct-mode or integration test tooling.
-- **No live end-to-end wallet transaction has been run against the deployed contract yet** (create grant → claim → consensus → release, with real testnet GEN). The write paths are implemented and typecheck against the real `genlayer-js` SDK surface, but haven't been exercised by an actual signed transaction as of this writing.
+- **Direct-mode contract test suite exists and passes**: `contracts/tests/direct/` (11 tests) covers grant creation, claim submission through a real mocked-web evaluation, access control, and the criterion-bound challenge resolution logic (including settlement-math assertions, not just status labels). Run with `pytest contracts/tests/direct/ -v`. There is no automated *integration-mode* (real multi-validator consensus) suite yet — see below.
+- **A live end-to-end run has been completed against the deployed contract**, under real GenVM multi-validator consensus (not direct-mode): `create_grant` → `submit_milestone_claim` → `file_challenge` → `resolve_challenge`, using two funded StudioNet accounts. A challenge filed against a still-passing criterion with unbound evidence correctly resolved `REJECTED`, and the result rendered correctly on the live frontend afterward. This was a manual one-off run (a local script), not yet a repeatable automated test in the repo — see `memory/MEMORY.md` for the full writeup, including two unrelated bugs (a stale cached Vercel build, and a backend indexer schema gap — see `backend/README.md` "Known gap") found and fixed along the way.
+- **Backend indexer schema has no `contract_address` column** — cached `grants`/`milestones`/`challenges` rows can collide by primary key across different contract deployments, since those IDs restart from a fresh sequence on every new deploy. Worth fixing properly before the next redeploy; see `backend/README.md`.
 - Socials/OAuth-linked profiles are explicitly out of scope for v1.
 
 ## License

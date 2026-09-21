@@ -4,7 +4,7 @@
 
 This repo has three independently-versioned packages that must stay consistent with each other:
 
-- `contracts/milestone_forge.py` — the deployed source of truth. Changing it does **not** change the live contract at `0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb` — GenLayer contracts are immutable once deployed. A contract change means: update the file, redeploy via GenLayer Studio to get a new address, then update `MILESTONE_FORGE_CONTRACT_ADDRESS` in both `backend/.env` and `NEXT_PUBLIC_MILESTONE_FORGE_CONTRACT_ADDRESS` in `frontend/.env.local` (and the corresponding Fly/Vercel secrets — see `docs/DEPLOYMENT.md`).
+- `contracts/milestone_forge.py` — the deployed source of truth. Changing it does **not** change the live contract at `0xc7aA666C8EF4fab7e7bc94A277eCD06161787314` — GenLayer contracts are immutable once deployed. A contract change means: update the file, redeploy via GenLayer Studio to get a new address, then update `MILESTONE_FORGE_CONTRACT_ADDRESS` in both `backend/.env` and `NEXT_PUBLIC_MILESTONE_FORGE_CONTRACT_ADDRESS` in `frontend/.env.local` (and the corresponding Fly/Vercel secrets — see `docs/DEPLOYMENT.md`). **After any redeploy, force an uncached frontend rebuild** (`vercel deploy --prod --yes --force`, not a plain `--yes`) and clear the backend indexer tables — see the "Vercel build cache" and indexer-schema notes in `docs/DEPLOYMENT.md` and `memory/MEMORY.md` for why both steps are required, not optional.
 - `backend/` — must stay compatible with whatever the currently-deployed contract's ABI actually is. If you rename or change the signature of a contract method, update `backend/src/genlayerClient.ts` / `backend/src/indexer.ts` and `frontend/lib/useMilestoneForge.ts` together.
 - `frontend/` — every write path in `frontend/lib/useMilestoneForge.ts` calls a specific contract function name and argument order. Keep those in sync with the contract source, not with docs — the contract is authoritative.
 
@@ -33,7 +33,14 @@ This repo has three independently-versioned packages that must stay consistent w
 
 ## Testing
 
-There is no automated test suite yet (`contracts/tests/` is scaffolded but empty — see the "Current status / known gaps" section of the root README). If you're adding meaningful new contract logic, adding direct-mode and/or integration tests alongside it is welcome and encouraged, using GenLayer's own test tooling rather than a new framework.
+`contracts/tests/direct/` has a direct-mode suite (11 tests, fast, in-process — see `contracts/README.md`) covering grant creation, claim/evaluation, access control, and the criterion-bound challenge resolution logic. Run it before every contract change and every redeploy:
+
+```bash
+pip install genlayer-test
+pytest contracts/tests/direct/ -v
+```
+
+There is no automated integration-mode (full validator consensus) suite yet — the one live end-to-end run against a deployed contract so far (create_grant → claim → file_challenge → resolve_challenge under real consensus) was a manual, one-off script, not a repeatable test in the repo. If you're adding meaningful new contract logic, extending the direct-mode suite alongside it is expected; adding a repeatable integration-mode test using GenLayer's own test tooling is welcome too.
 
 ## Reporting bugs vs. security issues
 

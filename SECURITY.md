@@ -9,7 +9,7 @@ Milestone Forge holds and moves real GEN through escrow on GenLayer StudioNet. T
 Include:
 - A description of the issue and its impact (which invariant breaks, and how).
 - Steps to reproduce, ideally against `contracts/milestone_forge.py` in GenLayer Studio or a local StudioNet-equivalent environment.
-- Whether it's exploitable against the currently deployed contract (`0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb`) or only against future/local versions.
+- Whether it's exploitable against the currently deployed contract (`0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`) or only against future/local versions.
 
 You should get an acknowledgment within a few days. Please give us a reasonable window to ship a fix before any public disclosure — the deployed contract cannot be silently patched (it's immutable once deployed; a fix means a new deployment and migration).
 
