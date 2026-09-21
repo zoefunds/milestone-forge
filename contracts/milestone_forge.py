@@ -346,7 +346,7 @@ class MilestoneForge(gl.Contract):
         self.next_grant_seq = self.next_grant_seq + u256(1)
 
         total_reward = u256(0)
-        milestone_ids: DynArray[str] = DynArray[str]()
+        milestone_ids: DynArray[str] = gl.storage.inmem_allocate(DynArray[str])
 
         for idx, m_spec in enumerate(spec):
             milestone_id, reward = self._create_milestone_from_spec(grant_id, u256(idx), m_spec)
@@ -416,7 +416,7 @@ class MilestoneForge(gl.Contract):
         milestone_id = f"ms-{int(self.next_milestone_seq)}"
         self.next_milestone_seq = self.next_milestone_seq + u256(1)
 
-        criteria_ids: DynArray[str] = DynArray[str]()
+        criteria_ids: DynArray[str] = gl.storage.inmem_allocate(DynArray[str])
         weight_total = u256(0)
         for c_spec in criteria_list:
             criterion_id = self._create_criterion(milestone_id, c_spec)
@@ -442,7 +442,7 @@ class MilestoneForge(gl.Contract):
             claimed_artifact_hash="",
             claim_note="",
             verdict="",
-            result_ids=DynArray[str](),
+            result_ids=gl.storage.inmem_allocate(DynArray[str]),
             recommended_payout_bps=u256(0),
             evaluated_at=u256(0),
             challenge_window_opens_at=u256(0),
@@ -588,7 +588,7 @@ class MilestoneForge(gl.Contract):
         if key in index:
             index[key].append(grant_id)
         else:
-            bucket: DynArray[str] = DynArray[str]()
+            bucket: DynArray[str] = gl.storage.inmem_allocate(DynArray[str])
             bucket.append(grant_id)
             index[key] = bucket
 
@@ -984,7 +984,7 @@ class MilestoneForge(gl.Contract):
         criteria_entries = result.get("criteria", [])
         any_unreachable = bool(result.get("any_unreachable", False))
 
-        result_ids: DynArray[str] = DynArray[str]()
+        result_ids: DynArray[str] = gl.storage.inmem_allocate(DynArray[str])
         passed_weight = u256(0)
         total_weight = u256(0)
         for entry in criteria_entries:
@@ -1533,11 +1533,11 @@ class MilestoneForge(gl.Contract):
 
     @gl.public.view
     def list_grants_by_funder(self, funder_address: str) -> DynArray[str]:
-        return self.grants_by_funder.get(Address(funder_address).as_hex, DynArray[str]())
+        return self.grants_by_funder.get(Address(funder_address).as_hex, gl.storage.inmem_allocate(DynArray[str]))
 
     @gl.public.view
     def list_grants_by_grantee(self, grantee_address: str) -> DynArray[str]:
-        return self.grants_by_grantee.get(Address(grantee_address).as_hex, DynArray[str]())
+        return self.grants_by_grantee.get(Address(grantee_address).as_hex, gl.storage.inmem_allocate(DynArray[str]))
 
     @gl.public.view
     def list_challenges(self) -> DynArray[str]:

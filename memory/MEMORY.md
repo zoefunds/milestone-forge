@@ -56,6 +56,26 @@ scratch:
   `typeof window` — this caused a real production 500 on every direct page
   load. See `frontend/README.md`.
 
+## Contract redeploy required (2026-09-21)
+
+The **first live transaction against the deployed contract failed** at
+`create_grant` with `TypeError: this class can't be instantiated by user`
+from GenVM's `DynArray.__init__`. Root cause: the contract built local
+temporary collections with `DynArray[str]()` directly (e.g.
+`milestone_ids: DynArray[str] = DynArray[str]()`) — GenVM does not allow
+that. The correct pattern, confirmed against the docs, is
+`gl.storage.inmem_allocate(DynArray[str])`. `genvm-lint check` does NOT
+catch this — it's a runtime-only failure, so lint passing is not sufficient
+proof a contract will actually execute.
+
+Fixed in `contracts/milestone_forge.py` (all 7 occurrences). **This means
+the deployed contract at `0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb` is
+stale/broken and must be redeployed** — the fix only exists in source until
+the user redeploys via GenLayer Studio and provides the new address (same
+process as `contracts/README.md`). Do not assume that address is still
+current without checking whether a redeploy has happened since this note
+was written.
+
 ## Outstanding / not yet done
 
 - No automated test suite (`contracts/tests/` is scaffolded, empty).
