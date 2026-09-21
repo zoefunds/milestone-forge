@@ -81,6 +81,30 @@ export default function CreateGrantPage() {
 
   const totalRewardGen = milestones.reduce((sum, m) => sum + (Number(m.reward_gen) || 0), 0);
 
+  function fillSampleData() {
+    setGrantTitle("Test Grant — HTTP Check");
+    // A real, valid address distinct from most connected wallets so the
+    // funder != grantee check passes out of the box. Swap this for a
+    // second wallet you actually control before submitting a claim.
+    setGranteeAddress("0x000000000000000000000000000000000000dE");
+    setSubmitError(null);
+    setMilestones([
+      {
+        title: "Health check test",
+        reward_gen: "0.01",
+        challenge_window_hours: 24,
+        criteria: [
+          {
+            ...newCriterion(),
+            description: "The live URL returns HTTP 200",
+            target_url: "https://httpbin.org/status/200",
+            weight_pct: 100,
+          },
+        ],
+      },
+    ]);
+  }
+
   async function handleSubmit() {
     setSubmitError(null);
     setResultGrantId(null);
@@ -147,13 +171,22 @@ export default function CreateGrantPage() {
   return (
     <AppShell active="/create">
       <div className="max-w-3xl mx-auto flex flex-col gap-6">
-        <div>
-          <span className="text-xs uppercase tracking-widest text-primary">GenLayer Intelligent Contract Escrow</span>
-          <h1 className="font-headline text-3xl font-bold mt-1">Create Autonomous Grant Escrow</h1>
-          <p className="text-on-surface-variant mt-1">
-            Define immutable tranches and precommitted, machine-checkable artifact criteria. Goalposts cannot be
-            moved once deposited on-chain.
-          </p>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <span className="text-xs uppercase tracking-widest text-primary">GenLayer Intelligent Contract Escrow</span>
+            <h1 className="font-headline text-3xl font-bold mt-1">Create Autonomous Grant Escrow</h1>
+            <p className="text-on-surface-variant mt-1">
+              Define immutable tranches and precommitted, machine-checkable artifact criteria. Goalposts cannot be
+              moved once deposited on-chain.
+            </p>
+          </div>
+          <button
+            onClick={fillSampleData}
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-surface-container-high text-primary text-xs font-mono hover:bg-surface-bright transition-colors"
+            title="Fills the form with a small, safe test grant (0.01 GEN, an always-reachable HTTP check). Replace the grantee address with a wallet you control before submitting."
+          >
+            ⚡ Fill Sample Data
+          </button>
         </div>
 
         <section className="rounded-xl bg-surface-container-low p-6 flex flex-col gap-4">
@@ -170,6 +203,10 @@ export default function CreateGrantPage() {
             placeholder="Grantee wallet address (0x...)"
             className="w-full px-3.5 py-2.5 rounded-lg bg-surface-container-lowest font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary"
           />
+          <p className="text-xs text-outline -mt-2">
+            Must be a different address than your connected wallet. If you used &quot;Fill Sample Data&quot;, swap
+            the placeholder for a second wallet you control if you want to submit the claim yourself later.
+          </p>
         </section>
 
         {milestones.map((m, mi) => (

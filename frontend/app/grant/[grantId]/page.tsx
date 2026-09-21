@@ -200,12 +200,23 @@ export default function GrantWorkspacePage() {
               <div className="flex flex-wrap gap-2 pt-2">
                 {isGrantee && m.status === "CLAIMABLE" && (
                   <div className="flex flex-col gap-2 w-full">
-                    <input
-                      value={claimNote}
-                      onChange={(e) => setClaimNote(e.target.value)}
-                      placeholder="Optional pointer note (IPFS/Arweave CID) — never trusted as evidence"
-                      className="px-3 py-2 rounded-lg bg-surface-container-lowest text-sm"
-                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={claimNote}
+                        onChange={(e) => setClaimNote(e.target.value)}
+                        placeholder="Optional pointer note (IPFS/Arweave CID) — never trusted as evidence"
+                        className="flex-1 px-3 py-2 rounded-lg bg-surface-container-lowest text-sm"
+                      />
+                      <button
+                        onClick={() =>
+                          setClaimNote("ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi")
+                        }
+                        className="shrink-0 px-2.5 py-2 rounded-lg bg-surface-container-high text-primary text-xs font-mono hover:bg-surface-bright"
+                        title="Fills a real, dereferenceable IPFS CID for testing"
+                      >
+                        ⚡ Sample
+                      </button>
+                    </div>
                     <button
                       onClick={() => handleClaim(m.milestone_id)}
                       className="px-4 py-2.5 rounded-lg bg-primary text-on-primary font-semibold hover:opacity-90"
@@ -258,6 +269,20 @@ export default function GrantWorkspacePage() {
 
               {challengeForm.milestoneId === m.milestone_id && (
                 <div className="rounded-lg bg-surface-container p-4 flex flex-col gap-3">
+                  <button
+                    onClick={() =>
+                      setChallengeForm((prev) => ({
+                        ...prev,
+                        category: "downtime",
+                        evidenceUrl: "https://httpbin.org/status/500",
+                        note: "Testing the additive-evidence challenge flow",
+                      }))
+                    }
+                    className="self-start px-2.5 py-1.5 rounded-lg bg-surface-container-high text-primary text-xs font-mono hover:bg-surface-bright"
+                    title="Fills a test challenge — good for exercising the bond/revert paths, not a genuine UPHELD result"
+                  >
+                    ⚡ Fill Sample Data
+                  </button>
                   <select
                     value={challengeForm.category}
                     onChange={(e) => setChallengeForm((prev) => ({ ...prev, category: e.target.value }))}

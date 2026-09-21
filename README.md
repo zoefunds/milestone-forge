@@ -142,10 +142,9 @@ npm run dev
 
 ## Trying it out
 
-Want to click through the live app without figuring out what to type into
-each field yourself? [`docs/TESTING_SAMPLES.md`](docs/TESTING_SAMPLES.md)
-has copy-paste sample values for every form (Create Grant, Claim Milestone,
-File Challenge) plus a suggested end-to-end test sequence.
+The live app has a **⚡ Fill Sample Data** button on every form (Create
+Grant, and the claim/challenge forms in the grant workspace) that fills in
+safe, always-reachable test values — no need to look anything up.
 
 ## Current status / known gaps
 
