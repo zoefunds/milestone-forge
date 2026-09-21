@@ -100,17 +100,32 @@ vercel deploy --prod --yes
       protocol params (admin, dispute bond, slash/bounty bps, challenge
       window range) correctly from the current address
       `0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`.
-- [ ] Retry `create_grant` and `update_protocol_params` against the current
-      address to confirm the earlier runtime fixes still hold live, not
-      just in direct-mode tests.
-- [ ] Submit a milestone claim, watch the real tx lifecycle (submitted →
-      accepted → finalized) render in the UI
+- [x] Live e2e test against the current address: `create_grant` →
+      `submit_milestone_claim` → `file_challenge` → `resolve_challenge`,
+      run directly against real GenVM multi-validator consensus (not
+      direct-mode). A two-criterion `PARTIAL_PASS` milestone was created,
+      claimed, and a challenge against the still-passing criterion with
+      unbound generic evidence correctly resolved `REJECTED` — the exact
+      scenario that used to auto-UPHOLD under the old bug. Confirmed
+      rendering correctly on the live frontend (`/grant/<id>` and
+      `/challenges`) afterward. Full incident writeup (including two real
+      bugs found along the way — a stale cached Vercel build and a
+      backend indexer schema gap) in `memory/MEMORY.md`.
 - [ ] Confirm the GenLayer rate limiter's Redis key appears in Upstash
       (`glrl:<minute>`) and disappears after ~70s (TTL working)
-- [ ] File and resolve a test challenge against a live deployment (only
-      direct-mode tests have exercised the new criterion-bound resolution
-      logic so far)
 
-The remaining checklist items require an actual wallet transaction against
-StudioNet and are best done by the user (or in a follow-up session using
-the browser tools against the live site).
+**Important — Vercel build cache does not invalidate on a
+`NEXT_PUBLIC_*` env var change alone.** A normal `vercel deploy --prod
+--yes` after updating `NEXT_PUBLIC_MILESTONE_FORGE_CONTRACT_ADDRESS` can
+silently restore the previous build's cache and ship a bundle with the
+OLD address still inlined, with no error anywhere. Always use `vercel
+deploy --prod --yes --force` (which discards cache unless `--with-cache`
+is also passed) after any env var change that affects build output. See
+`memory/MEMORY.md` for the live incident this caused.
+
+**Also**: `backend/src/db/schema.sql` has no `contract_address` column,
+so the indexer's cached rows (`grants`/`milestones`/`challenges`) can
+collide by primary key with a new contract deployment's own IDs, since
+those IDs are sequential *per contract instance*. Until the schema is
+fixed, truncate those tables (see `memory/MEMORY.md`) after every
+redeploy to a new address.

@@ -186,14 +186,80 @@ upheld bounty, 24h–168h challenge window) from the new address — confirms
 the frontend/contract wiring works, though this only exercises a read
 call, not the challenge write path itself.
 
+## Live e2e test of the challenge-resolution fix — passed, and two real bugs found/fixed (2026-09-21)
+
+Ran a full live end-to-end test against the fourth deploy
+(`0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`), not direct-mode: two fresh
+StudioNet accounts (funder/challenger and grantee, funded with test GEN by
+the user), driven via a one-off Node script using `genlayer-js`'s
+`createAccount(privateKey)` (no browser wallet needed) to call
+`create_grant` → `submit_milestone_claim` → `file_challenge` →
+`resolve_challenge` directly against the deployed contract, waiting out
+real multi-validator consensus at each step (each write took several
+minutes, consistent with the documented timeout-budget fix above).
+
+**Result: the fix works under real consensus.** A two-criterion milestone
+(A passes, B fails) correctly evaluated to `PARTIAL_PASS`. A challenge was
+filed against the *still-passing* criterion A with evidence that was
+reachable but did NOT reference A's own `target_url` — exactly the bug
+scenario. `resolve_challenge` correctly returned `REJECTED`, with
+`resolution_detail: "Criterion crit-5 still passes on re-check and no
+bound evidence corroborated a failure"` — under the pre-fix logic this
+exact scenario used to auto-UPHOLD. The milestone returned to
+`CHALLENGE_WINDOW` with `PARTIAL_PASS`/5000 bps untouched, and the
+challenger's bond was correctly zeroed (100% frivolous slash).
+
+Along the way, found and fixed two **real bugs, unrelated to the contract
+fix itself**:
+
+1. **The Vercel production frontend was silently serving a stale build**
+   with the OLD (third-deploy) contract address baked in, despite the env
+   var being correctly updated and `vercel deploy --prod` reporting
+   success — twice. Root cause: Vercel restored the previous build's
+   webpack/Next.js cache (`Restored build cache from previous
+   deployment`), and that cache does not invalidate on a `NEXT_PUBLIC_*`
+   env var change alone — the env var is inlined into JS at build time,
+   but the build step considered the source "unchanged" and skipped
+   recompiling the chunk that embeds `CONTRACT_ADDRESS`. This means the
+   frontend was reading a grant (`grant-3`) that actually belonged to the
+   *old* contract instance and rendering it as if it were current —
+   `funder`/`grantee`/title were all real but from the wrong deployment,
+   a genuinely confusing failure mode since nothing errored. **Fix: use
+   `vercel deploy --prod --yes --force`** (without `--with-cache`) to
+   force a clean, uncached build whenever a build-time env var changes,
+   not just `vercel deploy --prod --yes`. Verified by confirming the
+   rebuilt bundle no longer contains the old address string and that
+   `/grant/grant-3` now renders the correct live data.
+2. **The backend Postgres indexer schema (`backend/src/db/schema.sql`)
+   has no `contract_address` column** — `grant_id`/`milestone_id`/
+   `challenge_id` primary keys are only unique *within* one contract
+   deployment (they're sequential counters the contract assigns from
+   scratch on each fresh deploy), so cached rows from a prior deployment
+   silently collide by primary key with the new deployment's own IDs
+   after a redeploy. This compounded bug #1's confusion. Fixed for now by
+   truncating `grants`/`milestones`/`challenges`/`contract_events` once
+   (via a one-off script run through `flyctl ssh console`, then removed —
+   not left in the repo) now that the indexer is scoped to the current
+   (fourth) contract only. **This is a latent design gap, not just a
+   one-time cleanup**: the schema itself still has no way to distinguish
+   rows across contract redeploys, so this exact collision will recur on
+   any future redeploy unless the schema gets a `contract_address` column
+   (or the tables get truncated as a manual step every redeploy, which is
+   easy to forget). Worth fixing properly before deploy #5.
+
+**Practical rule for future redeploys**: after updating
+`MILESTONE_FORGE_CONTRACT_ADDRESS` and any redeploy, (a) force-rebuild the
+frontend (`vercel deploy --prod --yes --force`) rather than a normal
+deploy, and (b) clear the backend indexer tables, until the schema gap in
+point 2 is fixed permanently.
+
 ## Outstanding / not yet done
 
-- **Live challenge filing/resolution has never been exercised against the
-  fourth deploy** (`0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`) — only
-  direct-mode tests (`contracts/tests/direct/test_challenge_resolution.py`,
-  11/11 passing) have proven the new criterion-bound logic. `create_grant`/
-  claim/consensus/release were confirmed working against the prior (third)
-  deploy, but should be re-verified live on this address too, since it's a
-  fresh contract instance with its own state.
-- Only direct-mode tests exist (fast, in-process, no full validator
-  consensus exercised). No integration-mode (real consensus) test suite yet.
+- **Backend indexer schema has no `contract_address` column** (see above)
+  — rows collide across redeploys by reused sequential IDs. Should add the
+  column and scope all reads/writes by it, or otherwise make redeploys
+  safe by default instead of relying on someone remembering to truncate.
+- Only direct-mode tests exist for CI/local verification (fast, in-process,
+  no full validator consensus exercised). No automated integration-mode
+  (real consensus) test suite yet — the live e2e run above was manual/
+  one-off, not a repeatable test in the repo.
