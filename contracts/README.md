@@ -3,7 +3,7 @@
 The single production [GenLayer](https://docs.genlayer.com/) Intelligent Contract for the protocol. See [`../docs/PROTOCOL.md`](../docs/PROTOCOL.md) for the full behavioral spec.
 
 - **File**: `milestone_forge.py` (~1,600 lines)
-- **Deployed at**: `0x565E9013F85fa91491ecDD87E095201E0AEd1b84` on GenLayer StudioNet
+- **Deployed at**: `0xc7aA666C8EF4fab7e7bc94A277eCD06161787314` on GenLayer StudioNet (fourth deploy — adds the criterion-bound challenge resolution fix; see `docs/PROTOCOL.md` §6 and `memory/MEMORY.md`)
 - **Runner**: pinned to `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6` in the file's first-line `Depends` comment. Never change this to `:test` or `:latest` — those are local-development-only aliases that GenLayer networks reject.
 
 ## Constructor arguments (as deployed)

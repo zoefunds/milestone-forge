@@ -137,7 +137,7 @@ check `git log -- contracts/milestone_forge.py` for whether these three
 fixes are present in the currently-deployed source — don't assume they
 regressed without checking.
 
-## Challenge resolution fix — contract signature changed, redeploy #4 needed (2026-09-21)
+## Challenge resolution fix — redeploy #4 shipped and confirmed live (2026-09-21)
 
 External review flagged real weaknesses in `file_challenge`/`resolve_challenge`:
 additive evidence wasn't bound to any specific criterion (a generic page
@@ -176,21 +176,24 @@ instead of a hardcoded `"2500"` — this was also explicitly called out in
 the same review.
 
 **Status: fixed in source, verified locally (11/11 direct-mode tests
-passing), NOT yet deployed.** The live contract at
-`0x565E9013F85fa91491ecDD87E095201E0AEd1b84` still has the old 4-arg
-`file_challenge` and the old flawed resolution logic. A fourth redeploy is
-required before filing/resolving any real challenge — the frontend's
-`useFileChallenge` call now sends 5 args and will fail against the
-currently-deployed contract until the redeploy happens and the address is
-updated (same process as before: redeploy in Studio → update
-`MILESTONE_FORGE_CONTRACT_ADDRESS` in `backend/.env`/Fly secret and
-`frontend/.env.local`/Vercel env → redeploy both apps).
+passing), deployed as the fourth contract address:
+`0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`.** Wired into `backend/.env`,
+the Fly.io secret, `frontend/.env.local`, and the Vercel production env
+var; both apps redeployed. Live-verified by loading `/settings` on
+`https://milestone-forge.vercel.app`, which correctly read protocol
+params (admin address, 2500 GEN dispute bond, 100% frivolous slash, 20%
+upheld bounty, 24h–168h challenge window) from the new address — confirms
+the frontend/contract wiring works, though this only exercises a read
+call, not the challenge write path itself.
 
 ## Outstanding / not yet done
 
-- **Redeploy #4 required** (see above) before challenge filing/resolution
-  can be tested live — `create_grant`/claim/consensus/release are already
-  confirmed working against the current (third) deploy, but the challenge
-  path's ABI just changed.
+- **Live challenge filing/resolution has never been exercised against the
+  fourth deploy** (`0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`) — only
+  direct-mode tests (`contracts/tests/direct/test_challenge_resolution.py`,
+  11/11 passing) have proven the new criterion-bound logic. `create_grant`/
+  claim/consensus/release were confirmed working against the prior (third)
+  deploy, but should be re-verified live on this address too, since it's a
+  fresh contract instance with its own state.
 - Only direct-mode tests exist (fast, in-process, no full validator
   consensus exercised). No integration-mode (real consensus) test suite yet.

@@ -10,12 +10,18 @@
 3. Deploy. Copy the resulting contract address.
 4. Set it in `backend/.env` (`MILESTONE_FORGE_CONTRACT_ADDRESS`) and
    `frontend/.env.local` (`NEXT_PUBLIC_MILESTONE_FORGE_CONTRACT_ADDRESS`).
-5. **Status: done.** Deployed at `0x565E9013F85fa91491ecDD87E095201E0AEd1b84`
-   on StudioNet — this is the third deploy, after fixing all three runtime
-   bugs found in the first two (`DynArray` construction, `gl.emit_event`,
-   `gl.block`/`gl.hash` — see `memory/MEMORY.md` and `contracts/README.md`
-   §"Things genvm-lint check does NOT catch"). Verified locally beforehand
-   with `pytest contracts/tests/direct/ -v` (6/6 passing).
+5. **Status: done.** Deployed at `0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`
+   on StudioNet — this is the fourth deploy. The first three fixed runtime
+   bugs (`DynArray` construction, `gl.emit_event`, `gl.block`/`gl.hash` —
+   see `memory/MEMORY.md` and `contracts/README.md` §"Things genvm-lint
+   check does NOT catch") and are superseded. This deploy adds the
+   challenge-resolution fix: `file_challenge` now takes a required
+   `criterion_id` (breaking ABI change from the third deploy), additive
+   evidence must be verifiably bound to the disputed criterion's own
+   artifact anchor, and UPHELD/REJECTED is decided on that criterion alone
+   rather than the milestone's full pass rate — see `docs/PROTOCOL.md` §6.
+   Verified locally beforehand with `pytest contracts/tests/direct/ -v`
+   (11/11 passing).
 
 ## 2. Backend on Fly.io — **Status: done**
 
@@ -84,16 +90,26 @@ vercel deploy --prod --yes
       was also found via local testing before it could hit a live
       transaction. All three fixed and verified with
       `pytest contracts/tests/direct/ -v` (6/6), then redeployed a third
-      time to the current live address. See `memory/MEMORY.md` for the
-      full incident history.
+      time. A fourth deploy followed to fix a challenge-resolution
+      correctness bug (unbound generic evidence could auto-uphold a
+      challenge against a partial-pass milestone's still-passing
+      criterion) — verified with 11/11 direct-mode tests, redeployed to
+      the current live address. See `memory/MEMORY.md` for the full
+      incident history.
+- [x] Confirmed live: `/settings` on the production frontend reads
+      protocol params (admin, dispute bond, slash/bounty bps, challenge
+      window range) correctly from the current address
+      `0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`.
 - [ ] Retry `create_grant` and `update_protocol_params` against the current
-      address `0x565E9013F85fa91491ecDD87E095201E0AEd1b84` to confirm the
-      fixes hold live, not just in direct-mode tests.
+      address to confirm the earlier runtime fixes still hold live, not
+      just in direct-mode tests.
 - [ ] Submit a milestone claim, watch the real tx lifecycle (submitted →
       accepted → finalized) render in the UI
 - [ ] Confirm the GenLayer rate limiter's Redis key appears in Upstash
       (`glrl:<minute>`) and disappears after ~70s (TTL working)
-- [ ] File and resolve a test challenge
+- [ ] File and resolve a test challenge against a live deployment (only
+      direct-mode tests have exercised the new criterion-bound resolution
+      logic so far)
 
 The remaining checklist items require an actual wallet transaction against
 StudioNet and are best done by the user (or in a follow-up session using

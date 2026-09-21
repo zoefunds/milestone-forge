@@ -36,7 +36,7 @@ FINALIZED PULL-BASED WITHDRAWAL
 |---|---|
 | Frontend | https://milestone-forge.vercel.app |
 | Backend API | https://milestone-forge-backend.fly.dev |
-| Intelligent Contract | [`0x565E9013F85fa91491ecDD87E095201E0AEd1b84`](https://studio.genlayer.com) on GenLayer StudioNet |
+| Intelligent Contract | [`0xc7aA666C8EF4fab7e7bc94A277eCD06161787314`](https://studio.genlayer.com) on GenLayer StudioNet |
 
 Backend health check: `GET /health/healthz` → `{"status":"ok"}`.
 
