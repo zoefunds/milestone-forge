@@ -140,6 +140,13 @@ npm install
 npm run dev
 ```
 
+## Trying it out
+
+Want to click through the live app without figuring out what to type into
+each field yourself? [`docs/TESTING_SAMPLES.md`](docs/TESTING_SAMPLES.md)
+has copy-paste sample values for every form (Create Grant, Claim Milestone,
+File Challenge) plus a suggested end-to-end test sequence.
+
 ## Current status / known gaps
 
 This is an honest snapshot, not a marketing page:
