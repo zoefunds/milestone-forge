@@ -169,6 +169,27 @@ def test_bound_evidence_referencing_the_disputed_criterion_upholds(
     assert status == "UPHELD"
     milestone = contract.get_milestone(milestone_id)
     assert milestone["status"] == "FAILED"
+    # Settlement correctness, not just the status label: exactly the
+    # upheld_bounty_bps share (20% as configured at deploy) leaves the
+    # reward escrow to the challenger as a bounty; the remaining 80% stays
+    # in reward_deposited (the funder claims it back via
+    # claim_failed_milestone_refund, not lost) — and the challenge's own
+    # bond ledger is zeroed, proving the zero-then-transfer `_send_gen`
+    # path actually executed for both halves of the payout rather than
+    # just the verdict flag changing.
+    assert milestone["recommended_payout_bps"] == 0
+    reward_wei = 10 * 10**18
+    expected_bounty = reward_wei * 2000 // 10000  # 20% upheld_bounty_bps
+    assert milestone["reward_deposited"] == str(reward_wei - expected_bounty)
+    challenge = contract.get_challenge(challenge_id)
+    assert challenge["bond_deposited"] == "0"
+    assert challenge["status"] == "UPHELD"
+
+    # And the funder can now pull back what's left of the escrow.
+    direct_vm.sender = direct_alice
+    contract.claim_failed_milestone_refund(milestone_id)
+    milestone = contract.get_milestone(milestone_id)
+    assert milestone["reward_deposited"] == "0"
 
 
 def test_criterion_that_now_fails_on_recheck_upholds_without_needing_evidence(
@@ -200,6 +221,13 @@ def test_criterion_that_now_fails_on_recheck_upholds_without_needing_evidence(
     status = contract.resolve_challenge(challenge_id)
 
     assert status == "UPHELD"
+    milestone = contract.get_milestone(milestone_id)
+    assert milestone["status"] == "FAILED"
+    reward_wei = 10 * 10**18
+    expected_bounty = reward_wei * 2000 // 10000
+    assert milestone["reward_deposited"] == str(reward_wei - expected_bounty)
+    challenge = contract.get_challenge(challenge_id)
+    assert challenge["bond_deposited"] == "0"
 
 
 def test_rejected_challenger_bond_is_slashed_to_grantee(
