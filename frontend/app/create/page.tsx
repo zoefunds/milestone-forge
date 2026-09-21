@@ -382,9 +382,21 @@ export default function CreateGrantPage() {
             </div>
           )}
           <TxLifecycle state={state} />
+          {state.status === "timeout" && (
+            <div className="rounded-lg bg-error-container/20 p-3 text-error text-xs">
+              Before submitting again: check{" "}
+              <a href="/explore" className="underline">
+                Explore Grants
+              </a>{" "}
+              for a grant with this title first — the original transaction may still finalize and create it, and
+              submitting again would lock a second deposit.
+            </div>
+          )}
           <button
             onClick={handleSubmit}
-            disabled={!isConnected || state.status !== "idle" && state.status !== "failed"}
+            disabled={
+              !isConnected || (state.status !== "idle" && state.status !== "failed" && state.status !== "timeout")
+            }
             className="w-full py-3.5 rounded-lg bg-primary text-on-primary font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {isConnected ? "Lock Escrow & Deploy Grant" : "Connect wallet to continue"}

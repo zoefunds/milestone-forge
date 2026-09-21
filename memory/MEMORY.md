@@ -55,6 +55,20 @@ scratch:
 - `frontend/lib/reown.ts`'s `createAppKit()` call must NOT be gated behind
   `typeof window` — this caused a real production 500 on every direct page
   load. See `frontend/README.md`.
+- **`genlayer-js`'s default `waitForTransactionReceipt` poll budget is only
+  `interval: 3000ms, retries: 10` — 30 seconds total.** Real MilestoneForge
+  writes (claim submission, challenge resolution) trigger live
+  multi-validator web/GitHub/RPC fetches plus a full commit-reveal
+  consensus round and routinely take well over a minute. Using the SDK
+  default made the frontend report transactions as "failed" purely because
+  our poll gave up — while GEN could still move on-chain afterward, which
+  is a genuinely dangerous UX bug (tells the user their money is gone when
+  it isn't). Fixed in `frontend/lib/genlayer.ts` with explicit generous
+  budgets (`ACCEPTED_WAIT`/`FINALIZED_WAIT`, ~3min/~10min) and a distinct
+  `"timeout"` lifecycle status (never reported as `"failed"`) that tells
+  the user to check back rather than assume loss. If you see "transaction
+  failed" reports that don't match what actually happened on StudioNet,
+  check whether this distinction has regressed.
 
 ## Three real runtime bugs found and fixed across three deploys (2026-09-21)
 

@@ -20,6 +20,7 @@ export type TxLifecycleStatus =
   | "submitted"
   | "accepted"
   | "finalized"
+  | "timeout"
   | "failed";
 
 export interface TxLifecycleState {
@@ -63,6 +64,18 @@ function isTxSuccessful(tx: { statusName?: string; txExecutionResultName?: strin
   return tx.statusName === STATUS_FINALIZED && tx.txExecutionResultName !== EXECUTION_FAILED;
 }
 
+// genlayer-js's own default poll budget is interval:3000ms, retries:10 —
+// only 30 seconds total. That's nowhere near enough for a real MilestoneForge
+// write: milestone claim submission and challenge resolution both trigger
+// live multi-validator web/GitHub/RPC fetches plus a full commit-reveal
+// consensus round, which routinely takes well over a minute on StudioNet.
+// Using the SDK default caused the frontend to report a transaction as
+// "failed" purely because OUR poll gave up — while the write kept running
+// and could still finalize on-chain afterward. Give each stage a generous,
+// explicit budget instead of trusting the SDK default.
+const ACCEPTED_WAIT = { interval: 3000, retries: 60 }; // ~3 min
+const FINALIZED_WAIT = { interval: 5000, retries: 120 }; // ~10 min
+
 /**
  * Executes a write against MilestoneForge, tracking the REAL transaction
  * lifecycle via the GenLayer SDK's own status enum
@@ -100,19 +113,38 @@ export async function executeContractWrite(
   // Responsive UI checkpoint: validator consensus has produced a decision
   // (ACCEPTED), which is not yet durably settled.
   try {
-    await client.waitForTransactionReceipt({ hash: txId as any, status: STATUS_ACCEPTED as any });
+    await client.waitForTransactionReceipt({
+      hash: txId as any,
+      status: STATUS_ACCEPTED as any,
+      ...ACCEPTED_WAIT,
+    });
     onUpdate({ status: "accepted", txId });
   } catch {
-    // some transactions may skip straight to a terminal status; fall
-    // through to the finalization wait regardless.
+    // Either it skipped straight to a terminal status, or our ACCEPTED
+    // poll budget ran out while consensus was still forming — fall
+    // through to the (longer) finalization wait regardless; that one is
+    // authoritative.
   }
 
   let finalTx;
   try {
-    finalTx = await client.waitForTransactionReceipt({ hash: txId as any, status: STATUS_FINALIZED as any });
+    finalTx = await client.waitForTransactionReceipt({
+      hash: txId as any,
+      status: STATUS_FINALIZED as any,
+      ...FINALIZED_WAIT,
+    });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Transaction did not reach finalization";
-    onUpdate({ status: "failed", txId, error: message });
+    // This means OUR polling gave up — it does NOT mean the transaction
+    // failed. GenLayer consensus (especially for claim/challenge
+    // evaluation, which does live web fetches) can legitimately take
+    // longer than even our generous budget. The write may still finalize
+    // on-chain after we stop watching, so this must never be reported as
+    // "failed" — that would tell the user their GEN is gone when it isn't.
+    const message =
+      err instanceof Error
+        ? err.message
+        : "Still waiting on GenLayer validator consensus — this can take several minutes for claims/challenges";
+    onUpdate({ status: "timeout", txId, error: message });
     return { txId, success: false };
   }
 
