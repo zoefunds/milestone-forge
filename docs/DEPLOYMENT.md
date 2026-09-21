@@ -123,9 +123,19 @@ deploy --prod --yes --force` (which discards cache unless `--with-cache`
 is also passed) after any env var change that affects build output. See
 `memory/MEMORY.md` for the live incident this caused.
 
-**Also**: `backend/src/db/schema.sql` has no `contract_address` column,
-so the indexer's cached rows (`grants`/`milestones`/`challenges`) can
-collide by primary key with a new contract deployment's own IDs, since
-those IDs are sequential *per contract instance*. Until the schema is
-fixed, truncate those tables (see `memory/MEMORY.md`) after every
-redeploy to a new address.
+**Fixed (2026-09-21)**: `grants`/`milestones`/`challenges`/`contract_events`
+are now all keyed by `(contract_address, <id>)` instead of `<id>` alone —
+see `backend/src/db/schema.sql`. Redeploying to a new
+`MILESTONE_FORGE_CONTRACT_ADDRESS` no longer needs a manual table
+truncate: old rows stay in place under their own `contract_address` (kept
+for audit/history) and every route/indexer query is scoped to the
+currently configured address, so they can never be served as if they
+belonged to the new deployment. Just run the normal migration after
+deploying the backend:
+```bash
+flyctl ssh console -a milestone-forge-backend -C "node dist/db/migrate.js"
+```
+`schema.sql` includes an idempotent in-place migration for a database
+that already had these tables from before this column existed — see the
+comment block in that file. See `memory/MEMORY.md` for the incident this
+fixes and `backend/README.md` for the schema rationale.

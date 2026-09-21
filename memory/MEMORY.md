@@ -232,34 +232,36 @@ fix itself**:
    rebuilt bundle no longer contains the old address string and that
    `/grant/grant-3` now renders the correct live data.
 2. **The backend Postgres indexer schema (`backend/src/db/schema.sql`)
-   has no `contract_address` column** — `grant_id`/`milestone_id`/
+   had no `contract_address` column** — `grant_id`/`milestone_id`/
    `challenge_id` primary keys are only unique *within* one contract
    deployment (they're sequential counters the contract assigns from
    scratch on each fresh deploy), so cached rows from a prior deployment
-   silently collide by primary key with the new deployment's own IDs
-   after a redeploy. This compounded bug #1's confusion. Fixed for now by
-   truncating `grants`/`milestones`/`challenges`/`contract_events` once
-   (via a one-off script run through `flyctl ssh console`, then removed —
-   not left in the repo) now that the indexer is scoped to the current
-   (fourth) contract only. **This is a latent design gap, not just a
-   one-time cleanup**: the schema itself still has no way to distinguish
-   rows across contract redeploys, so this exact collision will recur on
-   any future redeploy unless the schema gets a `contract_address` column
-   (or the tables get truncated as a manual step every redeploy, which is
-   easy to forget). Worth fixing properly before deploy #5.
+   silently collided by primary key with the new deployment's own IDs
+   after a redeploy. This compounded bug #1's confusion. First worked
+   around with a one-off manual truncate, then **fixed properly the same
+   day**: every table (`grants`/`milestones`/`challenges`/
+   `contract_events`) is now keyed by `(contract_address, <id>)`, every
+   `indexer.ts` insert writes `contract_address` from `config
+   .contractAddress`, and every `routes/grants.ts` query filters by it.
+   `schema.sql` includes an idempotent in-place migration (`DO $$ ... $$`
+   blocks, careful about FK drop/add ordering across the
+   challenges→milestones→grants chain) for a database that already had
+   these tables from before the column existed — tested against a local
+   Postgres instance for both the fresh-install path and the
+   legacy-data-migration path before touching production. Deployed and
+   migrated live via `flyctl ssh console -C "node dist/db/migrate.js"`.
+   Redeploys no longer need a manual truncate: old rows just stay under
+   their own `contract_address`, never served as the current deployment's
+   data.
 
 **Practical rule for future redeploys**: after updating
-`MILESTONE_FORGE_CONTRACT_ADDRESS` and any redeploy, (a) force-rebuild the
-frontend (`vercel deploy --prod --yes --force`) rather than a normal
-deploy, and (b) clear the backend indexer tables, until the schema gap in
-point 2 is fixed permanently.
+`MILESTONE_FORGE_CONTRACT_ADDRESS` and redeploying, (a) force-rebuild the
+frontend (`vercel deploy --prod --yes --force`), and (b) redeploy the
+backend and run the migration (`node dist/db/migrate.js`) — no manual
+table truncation needed any more.
 
 ## Outstanding / not yet done
 
-- **Backend indexer schema has no `contract_address` column** (see above)
-  — rows collide across redeploys by reused sequential IDs. Should add the
-  column and scope all reads/writes by it, or otherwise make redeploys
-  safe by default instead of relying on someone remembering to truncate.
 - Only direct-mode tests exist for CI/local verification (fast, in-process,
   no full validator consensus exercised). No automated integration-mode
   (real consensus) test suite yet — the live e2e run above was manual/

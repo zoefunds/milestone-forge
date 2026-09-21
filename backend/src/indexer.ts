@@ -60,11 +60,11 @@ async function syncGrant(grantId: string): Promise<void> {
   }
 
   await pool.query(
-    `INSERT INTO grants (grant_id, funder_address, grantee_address, title, total_reward_wei, status, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, now())
-     ON CONFLICT (grant_id) DO UPDATE SET
+    `INSERT INTO grants (contract_address, grant_id, funder_address, grantee_address, title, total_reward_wei, status, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+     ON CONFLICT (contract_address, grant_id) DO UPDATE SET
        status = EXCLUDED.status, total_reward_wei = EXCLUDED.total_reward_wei, updated_at = now()`,
-    [grant.grant_id, grant.funder, grant.grantee, grant.title, grant.total_reward_wei, grant.status]
+    [config.contractAddress, grant.grant_id, grant.funder, grant.grantee, grant.title, grant.total_reward_wei, grant.status]
   );
 
   for (const milestoneId of grant.milestone_ids ?? []) {
@@ -84,14 +84,15 @@ async function syncMilestone(grantId: string, milestoneId: string): Promise<void
 
   await pool.query(
     `INSERT INTO milestones (
-       milestone_id, grant_id, idx, title, reward_wei, status, challenge_window_seconds,
+       contract_address, milestone_id, grant_id, idx, title, reward_wei, status, challenge_window_seconds,
        verdict, recommended_payout_bps, active_challenge_id, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
-     ON CONFLICT (milestone_id) DO UPDATE SET
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+     ON CONFLICT (contract_address, milestone_id) DO UPDATE SET
        status = EXCLUDED.status, verdict = EXCLUDED.verdict,
        recommended_payout_bps = EXCLUDED.recommended_payout_bps,
        active_challenge_id = EXCLUDED.active_challenge_id, updated_at = now()`,
     [
+      config.contractAddress,
       m.milestone_id,
       grantId,
       m.index,
