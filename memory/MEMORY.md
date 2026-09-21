@@ -137,12 +137,60 @@ check `git log -- contracts/milestone_forge.py` for whether these three
 fixes are present in the currently-deployed source — don't assume they
 regressed without checking.
 
+## Challenge resolution fix — contract signature changed, redeploy #4 needed (2026-09-21)
+
+External review flagged real weaknesses in `file_challenge`/`resolve_challenge`:
+additive evidence wasn't bound to any specific criterion (a generic page
+containing the word "error" could corroborate ANY dispute), and the UPHELD
+decision required the milestone's *entire* re-check to reach 100% pass —
+which meant a challenge against a `PARTIAL_PASS` milestone (which by
+definition has a failing criterion) would upheld almost automatically
+regardless of evidence relevance.
+
+Fixed in `contracts/milestone_forge.py`:
+- **`file_challenge` signature changed**: now
+  `file_challenge(milestone_id, criterion_id, category, evidence_url, evidence_note)`
+  — `criterion_id` is a new required positional arg, validated against the
+  milestone's own `criteria_ids`. **This is a breaking ABI change** —
+  frontend, any external caller, and the currently-deployed contract (still
+  on the old 4-arg signature) are now out of sync.
+- Evidence is only treated as corroborating when it's verifiably bound: the
+  evidence page must be reachable, reference the disputed criterion's own
+  artifact anchor (`target_url`/`repo_url`/`onchain_contract_address`)
+  verbatim, AND contain a failure keyword — all three, not just one.
+- UPHELD now keys off the disputed criterion specifically (either its own
+  re-check flips to failing, or bound evidence corroborates), never the
+  milestone's overall pass rate. Unrelated criteria no longer affect the
+  decision either way.
+- New test file `contracts/tests/direct/test_challenge_resolution.py` (5
+  tests) directly proves the old bug is fixed: unbound generic evidence
+  against a partial-pass milestone's still-passing criterion is correctly
+  REJECTED (this exact scenario used to auto-UPHOLD); properly bound
+  evidence correctly UPHOLDS; an honest re-check flip UPHOLDS without
+  needing evidence; bond slashing still works.
+
+Frontend (`frontend/app/grant/[grantId]/page.tsx`) updated to match: the
+challenge form now has a required criterion picker, and the dispute bond
+amount is read live from `get_protocol_params` (`readProtocolParams()`)
+instead of a hardcoded `"2500"` — this was also explicitly called out in
+the same review.
+
+**Status: fixed in source, verified locally (11/11 direct-mode tests
+passing), NOT yet deployed.** The live contract at
+`0x565E9013F85fa91491ecDD87E095201E0AEd1b84` still has the old 4-arg
+`file_challenge` and the old flawed resolution logic. A fourth redeploy is
+required before filing/resolving any real challenge — the frontend's
+`useFileChallenge` call now sends 5 args and will fail against the
+currently-deployed contract until the redeploy happens and the address is
+updated (same process as before: redeploy in Studio → update
+`MILESTONE_FORGE_CONTRACT_ADDRESS` in `backend/.env`/Fly secret and
+`frontend/.env.local`/Vercel env → redeploy both apps).
+
 ## Outstanding / not yet done
 
-- Live retest of `create_grant` (and ideally `update_protocol_params`)
-  against the third deploy address, to confirm all three bug fixes hold
-  in production and not just in direct-mode tests.
+- **Redeploy #4 required** (see above) before challenge filing/resolution
+  can be tested live — `create_grant`/claim/consensus/release are already
+  confirmed working against the current (third) deploy, but the challenge
+  path's ABI just changed.
 - Only direct-mode tests exist (fast, in-process, no full validator
   consensus exercised). No integration-mode (real consensus) test suite yet.
-- No live claim → consensus → release flow has been tried yet against any
-  deployed contract — only in direct-mode tests so far.

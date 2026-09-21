@@ -90,21 +90,38 @@ Any unreachable artifact anywhere in the criteria set forces the whole milestone
 | `PARTIAL_PASS` | `passed_weight / total_weight` — proportional to which weighted criteria passed |
 | `INCONCLUSIVE` | 0% (no release until re-evaluated) |
 
-## 6. Challenge window — additive evidence only
+## 6. Challenge window — additive evidence only, bound to one specific criterion
 
-Default 48 hours, configurable 24–168 hours **per milestone at genesis** (`create_grant` time), never changeable afterward. A challenge:
+Default 48 hours, configurable 24–168 hours **per milestone at genesis** (`create_grant` time), never changeable afterward.
 
-1. Requires staking exactly `default_dispute_bond_wei` (a protocol-wide parameter, admin-adjustable, currently 2,500 GEN) — see `get_protocol_params`.
-2. Supplies a `category` tag and an `evidence_url` (additive evidence — an independent uptime log, an archival snapshot, etc.) that must also pass the SSRF host guard.
-3. Triggers `resolve_challenge`, which re-runs the *exact same pinned criteria* (never new criteria) plus an additional check of the evidence URL for corroborating failure-signal keywords (`down`, `unreachable`, `timeout`, `error`, `outage`, `failed`, `offline`) in its own reachable content.
-4. Resolves `UPHELD` if the re-inspection no longer fully passes, **or** the additive evidence independently corroborates a failure the base re-check might still be masking (e.g. the target came back up between the original evaluation and the challenge, but an independent archival log shows it was down during the actual window).
-5. Resolves `REJECTED` otherwise.
+**A challenge disputes exactly one pinned criterion, never "the milestone" in general.** `file_challenge(milestone_id, criterion_id, category, evidence_url, evidence_note)` requires `criterion_id` to be one of the milestone's own `criteria_ids` — filing against an unrelated or nonexistent criterion reverts. This scoping is what makes the rest of the resolution logic sound, and it fixes a real bug found in production review:
+
+> Before this fix, resolution compared the re-check's *total weighted pass rate against 100%* — so a challenge against a `PARTIAL_PASS` milestone (which by definition already has a failing criterion) would upheld almost automatically, regardless of whether the submitted evidence had anything to do with the dispute. It also let a challenger overturn a criterion that was still genuinely passing, purely because an unrelated page somewhere contained a generic word like "error".
+
+The corrected flow:
+
+1. Staking exactly `default_dispute_bond_wei` (a protocol-wide parameter, admin-adjustable — see `get_protocol_params`; the frontend always reads this live, never hardcodes it).
+2. Supplying a `category` tag and an `evidence_url` that must pass the SSRF host guard.
+3. `resolve_challenge` re-runs the *exact same pinned criteria* (never new criteria) for the whole milestone (for a consistent structured re-check), and separately runs `_inspect_bound_evidence(evidence_url, disputed_criterion)` — which requires **three** things together before evidence counts as corroborating anything:
+   - the evidence URL is itself reachable (HTTP 200),
+   - its content explicitly references the **disputed criterion's own artifact anchor** (its `target_url`, `repo_url`, or `onchain_contract_address` — verbatim), and
+   - its content contains a failure-signal keyword (`down`, `unreachable`, `timeout`, `error`, `outage`, `failed`, `offline`).
+
+   A page missing any one of these three — including one that's just generically about failure but never mentions the disputed artifact — never corroborates.
+4. Resolves `UPHELD` when **either**:
+   - the disputed criterion's own re-check is reachable this time and now independently comes back failing (an honest flip needs no evidence at all), **or**
+   - the bound evidence check above passes.
+
+   Unreachable-on-retry is never itself treated as a demonstrated failure (protects against transient infrastructure flakiness). Other criteria's pass/fail state is irrelevant to this decision — a `PARTIAL_PASS` milestone's already-failing criterion doesn't make a challenge against its still-passing criterion any more likely to succeed.
+5. Resolves `REJECTED` otherwise — the milestone returns to `CHALLENGE_WINDOW` with its original verdict and payout split untouched.
 
 Outcomes:
 - **UPHELD** — milestone → `FAILED`; challenger gets their bond back plus `upheld_bounty_bps` (currently 20%) of the milestone's remaining escrowed reward.
 - **REJECTED** — milestone returns to `CHALLENGE_WINDOW`; `frivolous_slash_bps` (currently 100%) of the challenger's bond is slashed to the grantee, the remainder refunded to the challenger.
 
 Funds are structurally unwithdrawable while `active_challenge_id` is set — `release_milestone` explicitly checks this.
+
+Tests: `contracts/tests/direct/test_challenge_resolution.py` exercises all of the above — criterion-binding validation, unbound generic evidence being correctly rejected even against a partial-pass milestone, properly-bound evidence being correctly upheld, an honest re-check flip upholding without needing evidence, and bond slashing on a frivolous rejection.
 
 ## 7. Escrow custody pattern
 

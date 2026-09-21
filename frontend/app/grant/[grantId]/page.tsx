@@ -11,6 +11,7 @@ import {
   readMilestone,
   readCriterion,
   readCriterionResult,
+  readProtocolParams,
   useSubmitMilestoneClaim,
   useReleaseMilestone,
   useFileChallenge,
@@ -18,7 +19,7 @@ import {
   useCancelMilestone,
   useClaimFailedRefund,
 } from "@/lib/useMilestoneForge";
-import { formatGen, truncateAddress, formatTimestamp, secondsToHuman, genToAtto } from "@/lib/format";
+import { formatGen, truncateAddress, formatTimestamp, secondsToHuman } from "@/lib/format";
 
 interface MilestoneView {
   milestone_id: string;
@@ -56,14 +57,27 @@ export default function GrantWorkspacePage() {
   const claimRefund = useClaimFailedRefund();
 
   const [claimNote, setClaimNote] = useState("");
-  const [challengeForm, setChallengeForm] = useState({ milestoneId: "", category: "downtime", evidenceUrl: "", note: "" });
+  const [challengeForm, setChallengeForm] = useState({
+    milestoneId: "",
+    criterionId: "",
+    category: "downtime",
+    evidenceUrl: "",
+    note: "",
+  });
+  // Live from get_protocol_params — never hardcoded. The dispute bond is an
+  // admin-adjustable protocol parameter, so a stale hardcoded amount would
+  // either overpay (locking excess GEN with no refund path for the
+  // difference) or revert the challenge outright if the admin has since
+  // raised it.
+  const [protocolParams, setProtocolParams] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const g: any = await readGrant(params.grantId);
+      const [g, params_]: [any, any] = await Promise.all([readGrant(params.grantId), readProtocolParams()]);
       setGrant(g);
+      setProtocolParams(params_);
       const ms = await Promise.all((g.milestone_ids ?? []).map((id: string) => readMilestone(id) as Promise<MilestoneView>));
       setMilestones(ms);
 
@@ -113,10 +127,20 @@ export default function GrantWorkspacePage() {
     if (result.success) await load();
   }
   async function handleFileChallenge() {
-    if (!challengeForm.milestoneId) return;
-    const bondAtto = genToAtto("2500"); // matches default_dispute_bond_wei at deploy time
+    if (!challengeForm.milestoneId || !challengeForm.criterionId) return;
+    if (!protocolParams) {
+      setLoadError("Protocol parameters not loaded yet — try again in a moment");
+      return;
+    }
+    const bondAtto = BigInt(protocolParams.default_dispute_bond_wei);
     const result = await fileChallenge.run(
-      [challengeForm.milestoneId, challengeForm.category, challengeForm.evidenceUrl, challengeForm.note],
+      [
+        challengeForm.milestoneId,
+        challengeForm.criterionId,
+        challengeForm.category,
+        challengeForm.evidenceUrl,
+        challengeForm.note,
+      ],
       bondAtto
     );
     if (result.success) await load();
@@ -273,16 +297,35 @@ export default function GrantWorkspacePage() {
                     onClick={() =>
                       setChallengeForm((prev) => ({
                         ...prev,
+                        criterionId: m.criteria_ids[0] ?? "",
                         category: "downtime",
                         evidenceUrl: "https://httpbin.org/status/500",
                         note: "Testing the additive-evidence challenge flow",
                       }))
                     }
                     className="self-start px-2.5 py-1.5 rounded-lg bg-surface-container-high text-primary text-xs font-mono hover:bg-surface-bright"
-                    title="Fills a test challenge — good for exercising the bond/revert paths, not a genuine UPHELD result"
+                    title="Fills a test challenge — good for exercising the bond/revert paths, not a genuine UPHELD result (the sample evidence URL isn't bound to the selected criterion's own artifact, so it won't corroborate a real dispute)"
                   >
                     ⚡ Fill Sample Data
                   </button>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs uppercase text-outline">
+                      Disputed criterion — evidence must reference this criterion&apos;s own URL/repo/contract to
+                      count as bound
+                    </label>
+                    <select
+                      value={challengeForm.criterionId}
+                      onChange={(e) => setChallengeForm((prev) => ({ ...prev, criterionId: e.target.value }))}
+                      className="px-3 py-2 rounded bg-surface-container-lowest text-sm"
+                    >
+                      <option value="">Select the criterion being disputed...</option>
+                      {m.criteria_ids.map((cid) => (
+                        <option key={cid} value={cid}>
+                          {criteria[cid]?.description ?? cid}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <select
                     value={challengeForm.category}
                     onChange={(e) => setChallengeForm((prev) => ({ ...prev, category: e.target.value }))}
@@ -296,7 +339,7 @@ export default function GrantWorkspacePage() {
                   <input
                     value={challengeForm.evidenceUrl}
                     onChange={(e) => setChallengeForm((prev) => ({ ...prev, evidenceUrl: e.target.value }))}
-                    placeholder="Public additive evidence URL"
+                    placeholder="Public additive evidence URL — must reference the disputed criterion's own artifact"
                     className="px-3 py-2 rounded bg-surface-container-lowest font-mono text-sm"
                   />
                   <textarea
@@ -307,11 +350,19 @@ export default function GrantWorkspacePage() {
                     rows={2}
                   />
                   <div className="text-xs text-error">
-                    Bond: 2,500 GEN, slashed 100% to grantee if this challenge is rejected as frivolous.
+                    Bond:{" "}
+                    {protocolParams
+                      ? `${formatGen(protocolParams.default_dispute_bond_wei)} GEN`
+                      : "loading live bond amount..."}
+                    , slashed{" "}
+                    {protocolParams ? `${Number(protocolParams.frivolous_slash_bps) / 100}%` : "..."} to the
+                    grantee if this challenge is rejected as frivolous (read live from{" "}
+                    <code className="font-mono">get_protocol_params</code>, not hardcoded).
                   </div>
                   <button
                     onClick={handleFileChallenge}
-                    className="px-4 py-2 rounded bg-tertiary text-on-tertiary font-semibold"
+                    disabled={!challengeForm.criterionId || !protocolParams}
+                    className="px-4 py-2 rounded bg-tertiary text-on-tertiary font-semibold disabled:opacity-50"
                   >
                     Stake Bond & Dispatch Challenge
                   </button>

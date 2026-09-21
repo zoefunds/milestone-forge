@@ -76,8 +76,9 @@ def test_challenge_bond_mismatch_reverts(direct_vm, direct_deploy, direct_alice,
     contract = direct_deploy("contracts/milestone_forge.py", "2500000000000000000000", 10000, 2000)
 
     _grant_id, milestone_id = _create_and_claim(contract, direct_vm, direct_alice, direct_bob)
+    criterion_id = contract.get_milestone(milestone_id)["criteria_ids"][0]
 
     direct_vm.sender = direct_charlie
     direct_vm.value = 1 * 10**18  # wrong bond amount, should be 2500 GEN
     with direct_vm.expect_revert():
-        contract.file_challenge(milestone_id, "downtime", "https://example.com/evidence", "note")
+        contract.file_challenge(milestone_id, criterion_id, "downtime", "https://example.com/evidence", "note")

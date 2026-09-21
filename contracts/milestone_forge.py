@@ -232,6 +232,10 @@ class Milestone:
 class Challenge:
     challenge_id: str
     milestone_id: str
+    criterion_id: str  # the SPECIFIC pinned criterion this challenge disputes — evidence
+    # and the re-check decision are both bound to this criterion, never the
+    # milestone as a whole, so a challenge can never be upheld just because
+    # some unrelated criterion or an unrelated page looks bad.
     challenger: Address
     bond_wei: str  # agreed term
     bond_deposited: str  # actual escrow ledger
@@ -1142,7 +1146,9 @@ class MilestoneForge(gl.Contract):
     # ========================================================================
 
     @gl.public.write.payable
-    def file_challenge(self, milestone_id: str, category: str, evidence_url: str, evidence_note: str) -> str:
+    def file_challenge(
+        self, milestone_id: str, criterion_id: str, category: str, evidence_url: str, evidence_note: str
+    ) -> str:
         milestone = self._require_milestone(milestone_id)
         grant = self._require_grant(milestone.grant_id)
 
@@ -1152,6 +1158,11 @@ class MilestoneForge(gl.Contract):
             raise gl.vm.UserError(f"{ERROR_EXPECTED} Challenge window has already closed")
         if milestone.active_challenge_id:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} A challenge is already pending for this milestone")
+        if criterion_id not in milestone.criteria_ids:
+            raise gl.vm.UserError(
+                f"{ERROR_EXPECTED} criterion_id {criterion_id} does not belong to milestone {milestone_id} — "
+                f"a challenge must dispute one specific pinned criterion, not the milestone in general"
+            )
 
         sender = gl.message.sender_address
         if sender not in (grant.funder, grant.grantee):
@@ -1173,6 +1184,7 @@ class MilestoneForge(gl.Contract):
         challenge = Challenge(
             challenge_id=challenge_id,
             milestone_id=milestone_id,
+            criterion_id=criterion_id,
             challenger=sender,
             bond_wei=str(int(bond_wei)),
             bond_deposited=str(int(gl.message.value)),
@@ -1192,7 +1204,11 @@ class MilestoneForge(gl.Contract):
         self.milestones[milestone_id] = milestone
 
         ChallengeFiled(
-            challenge_id=challenge_id, milestone_id=milestone_id, challenger=sender.as_hex, category=category
+            challenge_id=challenge_id,
+            milestone_id=milestone_id,
+            criterion_id=criterion_id,
+            challenger=sender.as_hex,
+            category=category,
         ).emit()
         return challenge_id
 
@@ -1200,11 +1216,11 @@ class MilestoneForge(gl.Contract):
     def resolve_challenge(self, challenge_id: str) -> str:
         """Re-runs the SAME pinned genesis criteria via the multi-validator
         inspection, then additionally checks whether the challenger's
-        additive evidence_url independently corroborates a failure that the
-        original evaluation missed (e.g. the target URL is verifiably down
-        right now per a second independent fetch). The original criteria/
-        artifact locations are never replaced — only additional evidence is
-        consulted, and only to decide whether the ORIGINAL verdict holds.
+        additive evidence_url independently corroborates a failure of the
+        SPECIFIC disputed criterion (never the milestone in general). The
+        original criteria/artifact locations are never replaced — only
+        additional evidence is consulted, and only to decide whether the
+        original per-criterion result holds.
         """
         challenge = self.challenges.get(challenge_id)
         if challenge is None:
@@ -1214,10 +1230,11 @@ class MilestoneForge(gl.Contract):
 
         milestone = self._require_milestone(challenge.milestone_id)
         criteria = [self.criteria[cid] for cid in milestone.criteria_ids]
+        disputed_criterion = self.criteria[challenge.criterion_id]
 
         def leader_fn():
             base = self._inspect_all_criteria(criteria)
-            evidence_check = self._inspect_evidence_url(challenge.evidence_url)
+            evidence_check = self._inspect_bound_evidence(challenge.evidence_url, disputed_criterion)
             return {"base": base, "evidence": evidence_check}
 
         def validator_fn(leaders_res: gl.vm.Result) -> bool:
@@ -1236,33 +1253,67 @@ class MilestoneForge(gl.Contract):
                     return False
             l_ev = leader_data.get("evidence", {})
             v_ev = validator_data.get("evidence", {})
-            return bool(l_ev.get("reachable")) == bool(v_ev.get("reachable")) and bool(
-                l_ev.get("corroborates_failure")
-            ) == bool(v_ev.get("corroborates_failure"))
+            return (
+                bool(l_ev.get("reachable")) == bool(v_ev.get("reachable"))
+                and bool(l_ev.get("anchor_referenced")) == bool(v_ev.get("anchor_referenced"))
+                and bool(l_ev.get("corroborates_failure")) == bool(v_ev.get("corroborates_failure"))
+            )
 
         result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         return self._settle_challenge(challenge_id, result)
 
-    def _inspect_evidence_url(self, evidence_url: str) -> dict:
+    def _get_criterion_anchor(self, criterion) -> str:
+        """The identifying string that ties a piece of evidence to THIS
+        specific pinned criterion, rather than any generic page. Additive
+        evidence must reference this anchor verbatim to be treated as bound
+        — a page that merely contains a generic word like "error" but never
+        mentions the actual disputed URL/repo/contract can never corroborate
+        anything under this scheme.
+        """
+        if criterion.criterion_type == CRITERION_TYPE_HTTP:
+            return criterion.target_url
+        if criterion.criterion_type == CRITERION_TYPE_GIT:
+            return criterion.repo_url
+        return criterion.onchain_contract_address
+
+    def _inspect_bound_evidence(self, evidence_url: str, criterion) -> dict:
         try:
             response = gl.nondet.web.get(evidence_url)
         except Exception:
-            return {"reachable": False, "corroborates_failure": False}
+            return {"reachable": False, "anchor_referenced": False, "corroborates_failure": False}
         status = int(getattr(response, "status_code", getattr(response, "status", 0)))
         body_bytes = getattr(response, "body", b"")
         try:
             body_text = body_bytes.decode("utf-8") if isinstance(body_bytes, (bytes, bytearray)) else str(body_bytes)
         except UnicodeDecodeError:
             body_text = ""
+        reachable = status == 200
+
+        # Verifiable binding: the evidence page must explicitly reference the
+        # SAME artifact anchor (URL/repo/contract address) as the disputed
+        # criterion. Without this, any generic page containing a failure
+        # keyword could "corroborate" a completely unrelated dispute.
+        anchor = self._get_criterion_anchor(criterion)
+        anchor_referenced = bool(anchor) and anchor in body_text
+
         # A structured, conservative heuristic: the additive evidence
-        # corroborates a failure only if it is itself reachable (HTTP 200)
-        # AND its own content explicitly references a failure signal keyword.
-        # This keeps the check machine-checkable and reproducible rather than
-        # an open-ended LLM judgment call over free text.
+        # corroborates a failure only if it is itself reachable, explicitly
+        # references the disputed artifact, AND its content contains a
+        # failure-signal keyword. All three must hold — reachability or a
+        # generic keyword alone is never sufficient. This keeps the check
+        # machine-checkable and reproducible rather than an open-ended LLM
+        # judgment call over free text.
         lowered = body_text.lower()
         failure_markers = ("down", "unreachable", "timeout", "error", "outage", "failed", "offline")
-        corroborates = status == 200 and any(marker in lowered for marker in failure_markers)
-        return {"reachable": status == 200, "corroborates_failure": corroborates}
+        corroborates = reachable and anchor_referenced and any(marker in lowered for marker in failure_markers)
+        return {"reachable": reachable, "anchor_referenced": anchor_referenced, "corroborates_failure": corroborates}
+
+    def _find_result_for_criterion(self, milestone: Milestone, criterion_id: str):
+        for result_id in milestone.result_ids:
+            result = self.results.get(result_id)
+            if result is not None and result.criterion_id == criterion_id:
+                return result
+        return None
 
     def _settle_challenge(self, challenge_id: str, result: dict) -> str:
         challenge = self.challenges[challenge_id]
@@ -1271,39 +1322,56 @@ class MilestoneForge(gl.Contract):
         base = result.get("base", {})
         evidence = result.get("evidence", {})
         base_criteria = base.get("criteria", [])
-        any_unreachable = bool(base.get("any_unreachable", False))
         evidence_corroborates = bool(evidence.get("corroborates_failure", False))
 
-        passed_weight = u256(0)
-        total_weight = u256(0)
+        # Find the disputed criterion's ORIGINAL result (recorded at claim
+        # evaluation time) and its result on THIS re-check.
+        original_result = self._find_result_for_criterion(milestone, challenge.criterion_id)
+        original_passed = original_result.passed if original_result is not None else True
+
+        disputed_entry = None
         for entry in base_criteria:
-            criterion = self.criteria.get(entry.get("criterion_id"))
-            if criterion is None:
-                continue
-            total_weight = total_weight + criterion.weight_bps
-            if bool(entry.get("passed")):
-                passed_weight = passed_weight + criterion.weight_bps
+            if entry.get("criterion_id") == challenge.criterion_id:
+                disputed_entry = entry
+                break
+        disputed_unreachable = bool(disputed_entry.get("unreachable")) if disputed_entry is not None else True
+        disputed_now_passed = bool(disputed_entry.get("passed")) if disputed_entry is not None else original_passed
 
-        re_verdict_passed_fully = (not any_unreachable) and total_weight > u256(0) and passed_weight == total_weight
+        # A re-check that finds the artifact unreachable this time is NOT
+        # treated as a demonstrated failure — that would punish a grantee for
+        # transient infrastructure flakiness. Only a REACHABLE re-check that
+        # now fails counts as an independent flip.
+        criterion_flipped = original_passed and (not disputed_unreachable) and (not disputed_now_passed)
 
-        # UPHELD only when the re-inspection now shows the milestone does NOT
-        # fully pass anymore, OR the additive evidence independently
-        # corroborates a failure the base re-check might still be masking
-        # (e.g. the target was up during re-check but the challenger's
-        # independent archival log shows it was down during the actual
-        # evaluation window).
-        upheld = (not re_verdict_passed_fully) or evidence_corroborates
+        # UPHELD only when EITHER:
+        #   (a) an independent re-check of the SPECIFIC disputed criterion
+        #       itself now fails (not merely "the milestone isn't fully
+        #       passing" — unrelated criteria are irrelevant to this
+        #       decision, which is what previously made every challenge
+        #       against a PARTIAL_PASS milestone auto-succeed regardless of
+        #       whether the evidence was relevant), or
+        #   (b) the additive evidence is independently, verifiably BOUND to
+        #       that same criterion's artifact and corroborates a failure —
+        #       never a generic page that merely contains a failure word.
+        upheld = criterion_flipped or evidence_corroborates
 
         bond = _u256_from_str(challenge.bond_deposited)
         challenge.bond_deposited = "0"
 
         if upheld:
             challenge.status = CHALLENGE_STATUS_UPHELD
-            challenge.resolution_detail = "Re-inspection or additive evidence contradicted original verdict"
+            challenge.resolution_detail = (
+                f"Criterion {challenge.criterion_id} re-check flipped to failing"
+                if criterion_flipped
+                else f"Bound additive evidence corroborated a failure of criterion {challenge.criterion_id}"
+            )
             self._settle_upheld_challenge(milestone, challenge, bond)
         else:
             challenge.status = CHALLENGE_STATUS_REJECTED
-            challenge.resolution_detail = "Re-inspection confirmed original verdict; evidence did not corroborate"
+            challenge.resolution_detail = (
+                f"Criterion {challenge.criterion_id} still passes on re-check and no bound evidence "
+                f"corroborated a failure"
+            )
             self._settle_rejected_challenge(milestone, challenge, bond)
 
         challenge.resolved_at = _current_timestamp()
@@ -1572,6 +1640,7 @@ class MilestoneForge(gl.Contract):
         return {
             "challenge_id": c.challenge_id,
             "milestone_id": c.milestone_id,
+            "criterion_id": c.criterion_id,
             "challenger": c.challenger.as_hex,
             "bond_wei": c.bond_wei,
             "bond_deposited": c.bond_deposited,
