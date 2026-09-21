@@ -10,14 +10,12 @@
 3. Deploy. Copy the resulting contract address.
 4. Set it in `backend/.env` (`MILESTONE_FORGE_CONTRACT_ADDRESS`) and
    `frontend/.env.local` (`NEXT_PUBLIC_MILESTONE_FORGE_CONTRACT_ADDRESS`).
-5. **Status: a third redeploy is pending.** The currently-live address
-   `0xD09e8EE4C23E3900bdcC581859A3c658713155a1` still has two real bugs
-   fixed in source but not yet deployed (`gl.emit_event` and
-   `gl.block.timestamp`/`gl.hash` don't exist — see `contracts/README.md`
-   §"Things genvm-lint check does NOT catch" and `memory/MEMORY.md`). Run
-   `pytest contracts/tests/direct/ -v` (must be 6/6 passing) before
-   deploying again, then update the address everywhere per step 4 below
-   once the user deploys the fixed source.
+5. **Status: done.** Deployed at `0x565E9013F85fa91491ecDD87E095201E0AEd1b84`
+   on StudioNet — this is the third deploy, after fixing all three runtime
+   bugs found in the first two (`DynArray` construction, `gl.emit_event`,
+   `gl.block`/`gl.hash` — see `memory/MEMORY.md` and `contracts/README.md`
+   §"Things genvm-lint check does NOT catch"). Verified locally beforehand
+   with `pytest contracts/tests/direct/ -v` (6/6 passing).
 
 ## 2. Backend on Fly.io — **Status: done**
 
@@ -78,16 +76,19 @@ vercel deploy --prod --yes
       load confirmed HTTP 200 (fixed a `createAppKit` SSR crash found
       post-deploy — see MEMORY.md)
 - [x] Wallet connects via Reown, SIWE sign-in succeeds
-- [x] Create a test grant (small GEN amount) end-to-end — succeeded against
-      `0xD09e8EE4C23E3900bdcC581859A3c658713155a1` after fixing the
-      `DynArray` construction bug found on the first attempt (against the
-      now-superseded `0x8Bbb...B1DFb`).
-- [ ] A **third redeploy is required** before continuing this checklist —
-      `update_protocol_params` on the current address failed with a
-      `gl.emit_event` bug (fixed in source, not yet deployed). A further
-      `gl.block.timestamp`/`gl.hash` bug was also found and fixed via local
-      testing before it could hit a live transaction. See
-      `contracts/README.md` and `memory/MEMORY.md`.
+- [x] Create a test grant (small GEN amount) end-to-end — succeeded on the
+      second deploy attempt (`0xD09e...155a1`, since superseded) after
+      fixing a `DynArray` construction bug found on the first attempt
+      (`0x8Bbb...B1DFb`). That second address's `update_protocol_params`
+      then hit a `gl.emit_event` bug; a further `gl.block`/`gl.hash` bug
+      was also found via local testing before it could hit a live
+      transaction. All three fixed and verified with
+      `pytest contracts/tests/direct/ -v` (6/6), then redeployed a third
+      time to the current live address. See `memory/MEMORY.md` for the
+      full incident history.
+- [ ] Retry `create_grant` and `update_protocol_params` against the current
+      address `0x565E9013F85fa91491ecDD87E095201E0AEd1b84` to confirm the
+      fixes hold live, not just in direct-mode tests.
 - [ ] Submit a milestone claim, watch the real tx lifecycle (submitted →
       accepted → finalized) render in the UI
 - [ ] Confirm the GenLayer rate limiter's Redis key appears in Upstash

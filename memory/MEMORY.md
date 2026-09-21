@@ -56,53 +56,56 @@ scratch:
   `typeof window` — this caused a real production 500 on every direct page
   load. See `frontend/README.md`.
 
-## Three real runtime bugs found and fixed pre-3rd-deploy (2026-09-21)
+## Three real runtime bugs found and fixed across three deploys (2026-09-21)
 
 Two failed live transactions on StudioNet, then local direct-mode testing
 (`contracts/tests/direct/`, added this session), surfaced three bugs that
 `genvm-lint check` cannot catch (it's static-only, never executes the
 contract). Full technical detail: `contracts/README.md` §"Things
-genvm-lint check does NOT catch". Summary:
+genvm-lint check does NOT catch". History, oldest to newest:
 
 1. **`DynArray[T]()` can never be constructed directly — not even via
    `gl.storage.inmem_allocate`** (that's for generic `@allow_storage`
    dataclasses only; `DynArray.__init__` unconditionally raises). The
    actual fix is a plain Python `list` for any local temporary collection.
-   First deploy (`0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb`) hit this on
-   `create_grant`. An earlier fix attempt using `inmem_allocate` was itself
-   wrong and would have failed too — confirmed by local execution, not
-   assumption.
-2. **There is no flat `gl.emit_event(name, dict)` function.** Second deploy
-   (`0xD09e8EE4C23E3900bdcC581859A3c658713155a1`) hit this on
-   `update_protocol_params`. Fixed by defining `gl.Event` subclasses and
-   calling `.emit()`.
+   First deploy (`0x8Bbb6c4508D83d7bd0e3a4db555c92B3A1CB1DFb`, superseded)
+   hit this on `create_grant`. An earlier fix attempt using
+   `inmem_allocate` was itself wrong and would have failed too — confirmed
+   by local execution, not assumption.
+2. **There is no flat `gl.emit_event(name, dict)` function.** Second
+   deploy (`0xD09e8EE4C23E3900bdcC581859A3c658713155a1`, superseded) hit
+   this on `update_protocol_params`. Fixed by defining `gl.Event`
+   subclasses and calling `.emit()`.
 3. **There is no `gl.block.timestamp` or `gl.hash`.** Found via local
-   direct-mode tests before it could hit a third live transaction. Fixed
-   with `_current_timestamp()` (reads `gl.message_raw["datetime"]`) and
+   direct-mode tests before it could hit a live transaction. Fixed with
+   `_current_timestamp()` (reads `gl.message_raw["datetime"]`) and
    `Keccak256(...).hexdigest()`.
 
 All three fixed in `contracts/milestone_forge.py`, verified by
-`genvm-lint check` (clean) AND by actually running
-`pytest contracts/tests/direct/ -v` locally (6/6 passing, covering
-create_grant, claim submission through a real mocked-web evaluation to a
-PASSED verdict, access control, and challenge bond validation) — this is
-the first point in the project where the contract has been proven to
-execute, not just parse.
+`genvm-lint check` (clean) AND `pytest contracts/tests/direct/ -v` locally
+(6/6 passing, covering create_grant, claim submission through a real
+mocked-web evaluation to a PASSED verdict, access control, and challenge
+bond validation) — this was the first point in the project where the
+contract had been proven to execute, not just parse.
 
-**As of this note, none of the three fixes have been deployed yet.** The
-live address `0xD09e8EE4C23E3900bdcC581859A3c658713155a1` still has bugs
-#2 and #3. **A third redeploy is required** before any further live
-transaction testing. If a future session finds `create_grant` or any write
-failing with `TypeError`/`AttributeError` from GenVM again, check
-`git log -- contracts/milestone_forge.py` for whether these fixes are
-present in the currently-deployed source.
+**Current live address (third deploy): `0x565E9013F85fa91491ecDD87E095201E0AEd1b84`**
+— wired into `backend/.env`, the Fly.io secret, `frontend/.env.local`, and
+the Vercel env var, both apps redeployed. Constructor args unchanged
+(2,500 GEN bond, 100% frivolous slash, 20% upheld bounty). **Not yet
+confirmed working live** — `create_grant`/`update_protocol_params` should
+be retried against this address before assuming the fixes hold in
+production and not just in direct-mode tests. If a future session finds
+any write failing with `TypeError`/`AttributeError` from GenVM again,
+check `git log -- contracts/milestone_forge.py` for whether these three
+fixes are present in the currently-deployed source — don't assume they
+regressed without checking.
 
 ## Outstanding / not yet done
 
-- Contract needs a third redeploy (see above) before continuing live testing.
+- Live retest of `create_grant` (and ideally `update_protocol_params`)
+  against the third deploy address, to confirm all three bug fixes hold
+  in production and not just in direct-mode tests.
 - Only direct-mode tests exist (fast, in-process, no full validator
   consensus exercised). No integration-mode (real consensus) test suite yet.
-- No live end-to-end wallet transaction has fully succeeded against a
-  deployed contract yet (create grant did succeed once, at the address that
-  has since been superseded; claim → consensus → release has never been
-  tried live, only in direct-mode tests).
+- No live claim → consensus → release flow has been tried yet against any
+  deployed contract — only in direct-mode tests so far.

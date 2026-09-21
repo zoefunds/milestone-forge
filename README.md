@@ -36,7 +36,7 @@ FINALIZED PULL-BASED WITHDRAWAL
 |---|---|
 | Frontend | https://milestone-forge.vercel.app |
 | Backend API | https://milestone-forge-backend.fly.dev |
-| Intelligent Contract | [`0xD09e8EE4C23E3900bdcC581859A3c658713155a1`](https://studio.genlayer.com) on GenLayer StudioNet |
+| Intelligent Contract | [`0x565E9013F85fa91491ecDD87E095201E0AEd1b84`](https://studio.genlayer.com) on GenLayer StudioNet |
 
 Backend health check: `GET /health/healthz` → `{"status":"ok"}`.
 
@@ -86,7 +86,7 @@ Each of `contracts/`, `backend/`, and `frontend/` has its own README with setup 
            │ genlayer-js (reads only, backend never writes)
 ┌──────────▼─────────────────┐
 │  MilestoneForge.py            │  GenLayer StudioNet
-│  Intelligent Contract          │  0xD09e...155a1
+│  Intelligent Contract          │  0x565E...d1b84
 │  - grant/escrow/tranches       │
 │  - pinned criteria + artifacts │
 │  - validator web-fetch         │
