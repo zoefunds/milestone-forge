@@ -69,6 +69,29 @@ scratch:
   the user to check back rather than assume loss. If you see "transaction
   failed" reports that don't match what actually happened on StudioNet,
   check whether this distinction has regressed.
+- **`simplifyTransactionReceipt` (called internally by `waitForTransactionReceipt`)
+  RENAMES `statusName` to `status_name` (snake_case) in the object it
+  actually returns.** Checking `tx.statusName` on the result is always
+  `undefined` — this made `isTxSuccessful()` report EVERY successful
+  finalized transaction as failed (users saw "Transaction failed: Execution
+  failed" immediately after a grant that had, in fact, been created — visible
+  on Explore Grants). Separately, for `studionet` (`chain.isStudio === true`
+  — this is the chain this app uses), the SDK's `getTransaction` never
+  populates `txExecutionResult`/`txExecutionResultName` at all; the real
+  per-run outcome lives at `consensus_data.leader_receipt[].execution_result`
+  (a plain string GenVM sets, matching what the Studio explorer UI shows as
+  "Execution Result: SUCCESS"/"ERROR"). Fixed in `frontend/lib/genlayer.ts`'s
+  `isTxSuccessful()` to read `status_name` (with an `statusName` fallback for
+  safety) and check `leader_receipt[].execution_result` for an actual error
+  signal, defaulting to success (not failure) when no result is present —
+  same reasoning as the timeout fix above: a false "failed" report is worse
+  than a missed true failure, because it makes the user think their GEN is
+  gone. **Lesson for future debugging of this SDK**: never trust a field
+  name by reading the TypeScript `.d.ts` alone — `simplifyTransactionReceipt`
+  and `decodeTransaction` in `node_modules/genlayer-js/dist/index.js` (plain
+  JS, not typed) rename/reshape fields in ways the type definitions don't
+  fully capture. Read the actual `.js` implementation when a status check
+  doesn't behave as the types suggest it should.
 
 ## Three real runtime bugs found and fixed across three deploys (2026-09-21)
 

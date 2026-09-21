@@ -60,8 +60,45 @@ export async function getWriteClient(walletAddress: `0x${string}`) {
   return client;
 }
 
-function isTxSuccessful(tx: { statusName?: string; txExecutionResultName?: string }): boolean {
-  return tx.statusName === STATUS_FINALIZED && tx.txExecutionResultName !== EXECUTION_FAILED;
+/**
+ * Determines whether a finalized transaction actually succeeded.
+ *
+ * This is more subtle than it looks, and got it wrong once already: the
+ * object `waitForTransactionReceipt` resolves to has already been through
+ * `simplifyTransactionReceipt`, which RENAMES `statusName` to `status_name`
+ * (snake_case) in its output — so checking `tx.statusName` here is always
+ * `undefined` and silently reports every successful transaction as failed.
+ * Separately, for `studionet` (what this app targets — `chain.isStudio` is
+ * true for it), the SDK's `getTransaction` never populates
+ * `txExecutionResult`/`txExecutionResultName` at all; the real per-run
+ * outcome instead lives at `consensus_data.leader_receipt[].execution_result`
+ * (a string GenVM sets directly, e.g. what the Studio explorer UI shows as
+ * "Execution Result: SUCCESS" / "ERROR").
+ *
+ * This checks both fields defensively (old/new SDK shapes) and only
+ * declares failure when there's a positive error signal — absence of a
+ * result is treated as "finalized, no error observed", never as failure,
+ * since a false failure report tells the user their GEN is gone when it
+ * isn't (the same class of bug as the tx-timeout issue fixed alongside
+ * this).
+ */
+function isTxSuccessful(tx: any): boolean {
+  const statusName = tx?.status_name ?? tx?.statusName;
+  if (statusName !== STATUS_FINALIZED) return false;
+
+  if (tx?.txExecutionResultName === EXECUTION_FAILED) return false;
+
+  const leaderReceipts: any[] = Array.isArray(tx?.consensus_data?.leader_receipt)
+    ? tx.consensus_data.leader_receipt
+    : tx?.consensus_data?.leader_receipt
+      ? [tx.consensus_data.leader_receipt]
+      : [];
+  const hasExecutionError = leaderReceipts.some((r) => {
+    const result = String(r?.execution_result ?? "").toUpperCase();
+    return result.includes("ERROR") || result === "FAILED";
+  });
+
+  return !hasExecutionError;
 }
 
 // genlayer-js's own default poll budget is interval:3000ms, retries:10 —
@@ -148,11 +185,15 @@ export async function executeContractWrite(
     return { txId, success: false };
   }
 
-  const success = isTxSuccessful(finalTx as any);
+  const success = isTxSuccessful(finalTx);
+  const leaderReceipt = (finalTx as any)?.consensus_data?.leader_receipt;
+  const executionResult = Array.isArray(leaderReceipt)
+    ? leaderReceipt[0]?.execution_result
+    : leaderReceipt?.execution_result;
   onUpdate({
     status: success ? "finalized" : "failed",
     txId,
-    error: success ? undefined : String((finalTx as any).txExecutionResultName ?? "Execution failed"),
+    error: success ? undefined : String((finalTx as any)?.txExecutionResultName ?? executionResult ?? "Execution failed"),
   });
 
   return { txId, success };
