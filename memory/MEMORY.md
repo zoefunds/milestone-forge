@@ -260,6 +260,52 @@ frontend (`vercel deploy --prod --yes --force`), and (b) redeploy the
 backend and run the migration (`node dist/db/migrate.js`) — no manual
 table truncation needed any more.
 
+## Backend was exhausting GenLayer's hourly/daily rate budget, not just per-minute (2026-09-22)
+
+After the live e2e testing above, a user report ("created a milestone, it
+didn't show on the frontend for 2 minutes") traced back to the backend
+hitting GenLayer's own `"Rate limit exceeded: 500 requests per hour"` /
+`"...5000 requests per day"` errors — not the 30/min limit
+`genlayerRateLimiter.ts` was actually built to guard. Root causes, all real
+and all fixed the same day:
+
+1. **The rate limiter only ever tracked a per-minute window.** 28/min
+   sustained is ~1,680/hour and ~40,000/day — both already past GenLayer's
+   real hourly/daily caps, so the limiter could keep saying "yes" long
+   after GenLayer itself would start saying "no". Fixed: `glrl:m:<minute>`,
+   `glrl:h:<hour>`, `glrl:d:<day>` are now all incremented and checked in
+   one atomic Lua `EVAL` (still one Redis round trip per call, per the
+   existing minimal-Redis-usage constraint), and all three must pass.
+2. **Both Fly machines ran their own independent 30-second poller**,
+   silently doubling every indexer RPC call for zero benefit (same shared
+   Postgres). Fixed: a Redis `SET NX`-with-TTL lock (`mf:indexer-leader`)
+   means only one machine polls at a time; verified live by reading the
+   lock key directly (`GET mf:indexer-leader` → held by one machine id,
+   healthy TTL).
+3. **The indexer re-fetched every grant and every milestone on every
+   single poll, forever**, including ones already terminal
+   (`COMPLETED`/`CANCELLED` grants, `RELEASED`/`FAILED`/`CANCELLED`
+   milestones) that can never change state again. Fixed: terminal
+   grants/milestones are skipped after their first sync — steady-state
+   cost now tracks active grants only, not accumulated history.
+4. Poll interval default raised from 30s to 120s
+   (`INDEXER_POLL_INTERVAL_MS` env var to override).
+
+Combined: roughly an 8x cut in steady-state indexer RPC volume (2
+machines × 30s → 1 machine × 120s), with more reduction over time as
+grants/milestones terminalize. Deployed and verified live (leader lock
+confirmed held by exactly one machine via direct Redis read;
+`npx tsc --noEmit` + `npm run build` clean before deploy). Full rationale
+in `backend/README.md` "Why Redis is used for exactly two things".
+
+**Note for future sessions**: if GenLayer read errors return, don't
+assume it's a regression of these fixes without checking — a shared
+StudioNet-wide budget can still be exhausted by heavy testing (live e2e
+runs, manual polling from a dev session, etc.) regardless of how
+efficiently this backend itself behaves. These fixes reduce OUR
+contribution to that shared budget; they can't guarantee headroom if
+total testnet-wide demand is high.
+
 ## Outstanding / not yet done
 
 - Only direct-mode tests exist for CI/local verification (fast, in-process,

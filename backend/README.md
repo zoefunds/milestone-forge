@@ -9,16 +9,22 @@ Deployed at: **https://milestone-forge-backend.fly.dev** (Fly.io app `milestone-
 | Responsibility | File |
 |---|---|
 | SIWE nonce issuance + signature verification → session JWT cookie | `src/auth.ts`, `src/routes/auth.ts` |
-| Mirrors `grants`/`milestones` contract state into Postgres for fast list views | `src/indexer.ts` (polls every 30s) |
+| Mirrors `grants`/`milestones` contract state into Postgres for fast list views | `src/indexer.ts` (polls every 120s by default, one leader machine at a time, skips terminal grants/milestones) |
 | Serves the cached lists to the frontend | `src/routes/grants.ts` |
-| Keeps all GenLayer read traffic under GenLayer's 30 req/min limit, shared across all running machines | `src/genlayerRateLimiter.ts` |
+| Keeps all GenLayer read traffic under GenLayer's per-minute/hour/day limits, shared across all running machines | `src/genlayerRateLimiter.ts` |
 | Ordinary per-IP HTTP rate limiting for this API's own routes (separate, in-memory, no Redis) | `src/rateLimiter.ts` |
 | SSRF guard used to preview whether a criterion URL looks safe before a user spends gas on it | `src/ssrfGuard.ts` |
 | 24/7 uptime: graceful shutdown, health check, Fly auto-restart | `src/index.ts`, `fly.toml` |
 
-## Why Redis is used for exactly one thing
+## Why Redis is used for exactly two things
 
-GenLayer StudioNet enforces a 30 requests/minute cap on RPC calls. This app runs multiple Fly.io machines, so a per-process in-memory counter can't see what the other machine is doing. Redis (Upstash) is used *only* to hold a single shared counter (`glrl:<minute-bucket>`), incremented via one atomic Lua `EVAL` call per GenLayer read attempt — nothing else in this backend touches Redis. If Redis is unreachable, the limiter fails open to a more conservative per-instance in-memory fallback rather than blocking all reads. This is a deliberate choice to minimize Upstash command usage (the account is on a metered/free tier).
+**GenLayer StudioNet enforces per-minute, per-hour, AND per-day caps** (roughly 30/min, 500/hour, 5000/day — the exact hourly/daily numbers come from the RPC's own error messages, not published docs). `genlayerRateLimiter.ts` used to guard only the per-minute window, which is a real bug: 28/min sustained is ~1,680/hour and ~40,000/day, both far past the actual hourly/daily caps — this caused real production outages where GenLayer itself started rejecting every read with `"Rate limit exceeded: 500 requests per hour"` well before the old limiter ever said no. Fixed (2026-09-22): a single atomic Lua `EVAL` now increments and checks all three windows (`glrl:m:<minute>`, `glrl:h:<hour>`, `glrl:d:<day>`) in one Redis round trip per GenLayer call attempt, and ALL three must pass.
+
+**Indexer leader election.** This app runs multiple Fly.io machines, and each one used to run its own independent 30-second poller — silently doubling every GenLayer RPC call the indexer made, for zero benefit, since both write to the same shared Postgres. Fixed (2026-09-22): `src/indexer.ts` now uses a short-lived Redis lock (`mf:indexer-leader`, `SET NX` with a TTL) so only one machine polls at a time; if that machine goes away, the lock expires and another picks it up automatically.
+
+If Redis is unreachable, both mechanisms fail open (rate limiter → a more conservative per-instance in-memory fallback; leader election → every machine polls independently, same as before this fix) rather than blocking all reads. This is a deliberate choice to minimize Upstash command usage (the account is on a metered/free tier) while still guarding the account against GenLayer's real caps.
+
+**Further indexer cost reduction (2026-09-22)**: the poll interval default went from 30s to 120s (`INDEXER_POLL_INTERVAL_MS` env var to override), and grants/milestones that have reached a terminal state (`COMPLETED`/`CANCELLED` for grants, `RELEASED`/`FAILED`/`CANCELLED` for milestones) are skipped on every poll after their first sync, since they can never change again — steady-state RPC cost now tracks *active* grants only, not total history. Combined, these changes cut indexer RPC volume roughly 8x versus the pre-fix baseline (2 machines × 30s → 1 machine × 120s), with further reduction over time as more grants/milestones terminalize.
 
 Every other rate limit in this app (protecting the backend's own HTTP routes from abuse) is a separate, purely in-memory token-bucket implementation — see `src/rateLimiter.ts`.
 
